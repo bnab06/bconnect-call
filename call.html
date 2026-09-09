@@ -11,13 +11,13 @@
     background: #1E1E2E;
     font-family: -apple-system, sans-serif;
     height: 100%;
-    overflow: hidden;
   }
   #bnb-call-root {
     position: relative;
     width: 100vw;
-    height: 100vh;
+    height: 60vh;
     background: #1E1E2E;
+    overflow: hidden;
   }
   #bnb-remote-video {
     width: 100%;
@@ -29,8 +29,8 @@
     position: absolute;
     top: 24px;
     right: 24px;
-    width: 120px;
-    height: 160px;
+    width: 100px;
+    height: 130px;
     border-radius: 14px;
     overflow: hidden;
     border: 2px solid white;
@@ -51,29 +51,53 @@
     background: rgba(0,0,0,0.55);
     padding: 8px 16px;
     border-radius: 20px;
-    font-size: 14px;
-    max-width: 60%;
+    font-size: 13px;
+    max-width: 55%;
   }
   #bnb-controls {
     position: absolute;
-    bottom: 30px;
+    bottom: 16px;
     left: 0;
     right: 0;
     display: flex;
     justify-content: center;
-    gap: 18px;
+    gap: 16px;
   }
   .bnb-btn {
-    width: 56px;
-    height: 56px;
+    width: 50px;
+    height: 50px;
     border-radius: 50%;
     border: none;
     background: #6C5CE7;
     color: white;
-    font-size: 22px;
+    font-size: 20px;
   }
   .bnb-btn.hangup {
     background: #E74C3C;
+  }
+  #bnb-debug-panel {
+    width: 100%;
+    height: 40vh;
+    background: #000;
+    color: #0F0;
+    font-family: monospace;
+    font-size: 11px;
+    overflow-y: scroll;
+    padding: 8px;
+    box-sizing: border-box;
+    -webkit-overflow-scrolling: touch;
+  }
+  #bnb-debug-panel div {
+    margin-bottom: 3px;
+    word-wrap: break-word;
+  }
+  #bnb-debug-header {
+    background: #333;
+    color: white;
+    font-size: 12px;
+    padding: 6px 8px;
+    display: flex;
+    justify-content: space-between;
   }
 </style>
 </head>
@@ -96,15 +120,39 @@
   </div>
 </div>
 
+<div id="bnb-debug-header">
+  <span>🔧 Journal technique (à copier si besoin)</span>
+  <span id="bnb-copy-hint">Maintiens le doigt pour copier</span>
+</div>
+<div id="bnb-debug-panel"></div>
+
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.0/dist/livekit-client.umd.min.js"></script>
 <script>
 (async function () {
+    const debugPanel = document.getElementById('bnb-debug-panel');
+    function log(msg) {
+        const line = document.createElement('div');
+        const time = new Date().toLocaleTimeString();
+        line.textContent = `[${time}] ${msg}`;
+        debugPanel.appendChild(line);
+        debugPanel.scrollTop = debugPanel.scrollHeight;
+        console.log(msg);
+    }
+    window.onerror = function (message, source, lineno, colno, error) {
+        log("❌ ERREUR JS: " + message + " (ligne " + lineno + ")");
+    };
+
     const params = new URLSearchParams(window.location.search);
     const livekitUrl = params.get('url');
     const token = params.get('token');
     const showVideo = params.get('type') === 'video';
 
+    log("Démarrage. showVideo=" + showVideo);
+    log("URL LiveKit: " + (livekitUrl ? livekitUrl : "MANQUANTE"));
+    log("Token présent: " + (token ? "oui (" + token.length + " caractères)" : "MANQUANT"));
+
     const LK = LivekitClient;
+    log("Version livekit-client chargée: " + (LK.version || "inconnue"));
     const room = new LK.Room();
 
     const statusEl = document.getElementById('bnb-status');
@@ -120,50 +168,98 @@
 
     if (!livekitUrl || !token) {
         statusEl.innerText = "❌ Lien d'appel invalide (paramètres manquants).";
+        log("ARRÊT : paramètres manquants.");
         return;
     }
 
+    // Écoute de TOUS les événements pertinents de la room, avant même
+    // de se connecter, pour ne rien manquer.
+    room.on(LK.RoomEvent.ConnectionStateChanged, (state) => {
+        log("État de connexion: " + state);
+    });
+    room.on(LK.RoomEvent.ParticipantConnected, (p) => {
+        log("👤 Participant connecté: " + p.identity);
+    });
+    room.on(LK.RoomEvent.ParticipantDisconnected, (p) => {
+        log("👤 Participant déconnecté: " + (p ? p.identity : "?"));
+        statusEl.innerText = "L'autre personne a quitté l'appel.";
+    });
+    room.on(LK.RoomEvent.TrackPublished, (publication, participant) => {
+        log("📡 Track PUBLIÉE par " + participant.identity + " (" + publication.kind + ")");
+    });
+    room.on(LK.RoomEvent.TrackSubscribed, (track, publication, participant) => {
+        log("✅ Track REÇUE de " + participant.identity + " (" + track.kind + ")");
+        statusEl.innerText = "En cours d'appel";
+        if (track.kind === 'video') {
+            track.attach(remoteVideoEl);
+        } else if (track.kind === 'audio') {
+            track.attach(remoteAudioEl);
+        }
+    });
+    room.on(LK.RoomEvent.TrackSubscriptionFailed, (trackSid, participant) => {
+        log("❌ ÉCHEC subscription track " + trackSid + " de " + participant.identity);
+    });
+    room.on(LK.RoomEvent.TrackUnpublished, (publication, participant) => {
+        log("📡 Track dépubliée par " + participant.identity);
+    });
+    room.on(LK.RoomEvent.LocalTrackPublished, (publication) => {
+        log("📤 MA track publiée: " + publication.kind);
+    });
+    room.on(LK.RoomEvent.MediaDevicesError, (e) => {
+        log("⚠️ Erreur périphérique média: " + e.message);
+    });
+    room.on(LK.RoomEvent.Disconnected, (reason) => {
+        log("Déconnecté. Raison: " + reason);
+        statusEl.innerText = "Appel terminé. Tu peux fermer cet onglet.";
+    });
+    room.on(LK.RoomEvent.Reconnecting, () => {
+        log("🔄 Reconnexion en cours...");
+    });
+    room.on(LK.RoomEvent.Reconnected, () => {
+        log("✅ Reconnecté.");
+    });
+
     try {
+        log("Tentative de connexion à la room...");
         await room.connect(livekitUrl, token);
+        log("✅ Connecté à la room. SID room: " + room.name);
+        log("Nombre de participants déjà présents: " + room.numParticipants);
         statusEl.innerText = "Connecté. Activation du micro...";
 
         try {
             await room.localParticipant.setMicrophoneEnabled(true);
+            log("✅ Micro activé et publié.");
             statusEl.innerText = "En attente de l'autre participant...";
         } catch (micErr) {
+            log("❌ ERREUR micro: " + micErr.message);
             statusEl.innerText = "⚠️ Micro refusé : " + micErr.message;
         }
 
         if (showVideo) {
             try {
                 await room.localParticipant.setCameraEnabled(true);
+                log("✅ Caméra activée et publiée.");
                 const camPub = room.localParticipant.getTrackPublication(LK.Track.Source.Camera);
                 if (camPub && camPub.track) {
                     camPub.track.attach(localVideoEl);
                 }
             } catch (camErr) {
+                log("❌ ERREUR caméra: " + camErr.message);
                 statusEl.innerText = "⚠️ Caméra refusée : " + camErr.message;
             }
         }
 
-        room.on(LK.RoomEvent.TrackSubscribed, (track) => {
-            statusEl.innerText = "En cours d'appel";
-            if (track.kind === 'video') {
-                track.attach(remoteVideoEl);
-            } else if (track.kind === 'audio') {
-                track.attach(remoteAudioEl);
-            }
-        });
-
-        room.on(LK.RoomEvent.ParticipantDisconnected, () => {
-            statusEl.innerText = "L'autre personne a quitté l'appel.";
-        });
-
-        room.on(LK.RoomEvent.Disconnected, () => {
-            statusEl.innerText = "Appel terminé. Tu peux fermer cet onglet.";
+        // Vérifie s'il y avait déjà des participants/tracks au moment
+        // de notre connexion (utile si l'autre est arrivé avant nous).
+        room.remoteParticipants.forEach((participant) => {
+            log("👤 Déjà présent: " + participant.identity);
+            participant.trackPublications.forEach((pub) => {
+                log("   -> track existante: " + pub.kind + " (souscrite: " + pub.isSubscribed + ")");
+            });
         });
 
     } catch (err) {
+        log("❌ ERREUR de connexion à la room: " + err.message);
         statusEl.innerText = "❌ Erreur de connexion : " + err.message;
     }
 
@@ -172,6 +268,7 @@
         micOn = !micOn;
         await room.localParticipant.setMicrophoneEnabled(micOn);
         this.style.opacity = micOn ? "1" : "0.5";
+        log("Micro " + (micOn ? "réactivé" : "coupé") + " manuellement.");
     };
 
     let camOn = true;
@@ -179,12 +276,13 @@
         camOn = !camOn;
         await room.localParticipant.setCameraEnabled(camOn);
         this.style.opacity = camOn ? "1" : "0.5";
+        log("Caméra " + (camOn ? "réactivée" : "coupée") + " manuellement.");
     };
 
     document.getElementById('bnb-hangup').onclick = function () {
+        log("Raccroché manuellement.");
         room.disconnect();
         statusEl.innerText = "Appel terminé. Tu peux fermer cet onglet.";
-        setTimeout(() => window.close(), 800);
     };
 
     // Caméra locale déplaçable (souris + tactile)
