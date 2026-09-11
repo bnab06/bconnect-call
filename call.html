@@ -146,6 +146,31 @@
     const livekitUrl = params.get('url');
     const token = params.get('token');
     const showVideo = params.get('type') === 'video';
+    const callId = params.get('call_id');
+    const sbUrl = params.get('sb_url');
+    const sbKey = params.get('sb_key');
+    const sbToken = params.get('sb_token');
+
+    let callAlreadyEnded = false;
+    async function notifyCallEnded() {
+        if (callAlreadyEnded || !callId || !sbUrl || !sbKey || !sbToken) return;
+        callAlreadyEnded = true;
+        try {
+            await fetch(`${sbUrl}/rest/v1/calls?id=eq.${callId}`, {
+                method: 'PATCH',
+                headers: {
+                    'apikey': sbKey,
+                    'Authorization': `Bearer ${sbToken}`,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=minimal',
+                },
+                body: JSON.stringify({ status: 'ended', ended_at: new Date().toISOString() }),
+            });
+            log("📤 Statut 'terminé' envoyé à l'application principale.");
+        } catch (e) {
+            log("⚠️ Impossible de notifier l'app principale : " + e.message);
+        }
+    }
 
     log("Démarrage. showVideo=" + showVideo);
     log("URL LiveKit: " + (livekitUrl ? livekitUrl : "MANQUANTE"));
@@ -211,6 +236,7 @@
     room.on(LK.RoomEvent.Disconnected, (reason) => {
         log("Déconnecté. Raison: " + reason);
         statusEl.innerText = "Appel terminé. Tu peux fermer cet onglet.";
+        notifyCallEnded();
     });
     room.on(LK.RoomEvent.Reconnecting, () => {
         log("🔄 Reconnexion en cours...");
@@ -283,6 +309,7 @@
         log("Raccroché manuellement.");
         room.disconnect();
         statusEl.innerText = "Appel terminé. Tu peux fermer cet onglet.";
+        notifyCallEnded();
     };
 
     // Caméra locale déplaçable (souris + tactile)
