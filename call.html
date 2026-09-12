@@ -1,361 +1,94 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>BnB Connect — Appel</title>
-<style>
-  html, body {
-    margin: 0;
-    padding: 0;
-    background: #1E1E2E;
-    font-family: -apple-system, sans-serif;
-    height: 100%;
-  }
-  #bnb-call-root {
-    position: relative;
-    width: 100vw;
-    height: 60vh;
-    background: #1E1E2E;
-    overflow: hidden;
-  }
-  #bnb-remote-video {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    background: #111;
-  }
-  #bnb-local-wrapper {
-    position: absolute;
-    top: 24px;
-    right: 24px;
-    width: 100px;
-    height: 130px;
-    border-radius: 14px;
-    overflow: hidden;
-    border: 2px solid white;
-    cursor: grab;
-    touch-action: none;
-    background: #333;
-  }
-  #bnb-local-video {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-  #bnb-status {
-    position: absolute;
-    top: 24px;
-    left: 24px;
-    color: white;
-    background: rgba(0,0,0,0.55);
-    padding: 8px 16px;
-    border-radius: 20px;
-    font-size: 13px;
-    max-width: 55%;
-  }
-  #bnb-controls {
-    position: absolute;
-    bottom: 16px;
-    left: 0;
-    right: 0;
-    display: flex;
-    justify-content: center;
-    gap: 16px;
-  }
-  .bnb-btn {
-    width: 50px;
-    height: 50px;
-    border-radius: 50%;
-    border: none;
-    background: #6C5CE7;
-    color: white;
-    font-size: 20px;
-  }
-  .bnb-btn.hangup {
-    background: #E74C3C;
-  }
-  #bnb-debug-panel {
-    width: 100%;
-    height: 40vh;
-    background: #000;
-    color: #0F0;
-    font-family: monospace;
-    font-size: 11px;
-    overflow-y: scroll;
-    padding: 8px;
-    box-sizing: border-box;
-    -webkit-overflow-scrolling: touch;
-  }
-  #bnb-debug-panel div {
-    margin-bottom: 3px;
-    word-wrap: break-word;
-  }
-  #bnb-debug-header {
-    background: #333;
-    color: white;
-    font-size: 12px;
-    padding: 6px 8px;
-    display: flex;
-    justify-content: space-between;
-  }
-</style>
-</head>
-<body>
+"""
+calls.py
+Gère le cycle de vie d'un appel audio/vidéo : création (sonnerie),
+acceptation, refus, fin d'appel, et détection d'un appel entrant.
+La signalisation passe par la table "calls" de Supabase (déjà présente
+dans le schéma initial) — LiveKit ne gère que le flux audio/vidéo lui-même.
+"""
 
-<div id="bnb-call-root">
-  <video id="bnb-remote-video" autoplay playsinline></video>
-  <audio id="bnb-remote-audio" autoplay></audio>
+import uuid
+from config import get_supabase_client
 
-  <div id="bnb-local-wrapper">
-    <video id="bnb-local-video" autoplay playsinline muted></video>
-  </div>
 
-  <div id="bnb-status">Connexion...</div>
-
-  <div id="bnb-controls">
-    <button class="bnb-btn" id="bnb-toggle-mic">🎤</button>
-    <button class="bnb-btn" id="bnb-toggle-cam">📷</button>
-    <button class="bnb-btn hangup" id="bnb-hangup">📵</button>
-  </div>
-</div>
-
-<div id="bnb-debug-header">
-  <span>🔧 Journal technique (à copier si besoin)</span>
-  <span id="bnb-copy-hint">Maintiens le doigt pour copier</span>
-</div>
-<div id="bnb-debug-panel"></div>
-
-<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.0/dist/livekit-client.umd.min.js"></script>
-<script>
-(async function () {
-    const debugPanel = document.getElementById('bnb-debug-panel');
-    function log(msg) {
-        const line = document.createElement('div');
-        const time = new Date().toLocaleTimeString();
-        line.textContent = `[${time}] ${msg}`;
-        debugPanel.appendChild(line);
-        debugPanel.scrollTop = debugPanel.scrollHeight;
-        console.log(msg);
-    }
-    window.onerror = function (message, source, lineno, colno, error) {
-        log("❌ ERREUR JS: " + message + " (ligne " + lineno + ")");
-    };
-
-    const params = new URLSearchParams(window.location.search);
-    const livekitUrl = params.get('url');
-    const token = params.get('token');
-    const showVideo = params.get('type') === 'video';
-    const callId = params.get('call_id');
-    const sbUrl = params.get('sb_url');
-    const sbKey = params.get('sb_key');
-    const sbToken = params.get('sb_token');
-
-    let callAlreadyEnded = false;
-    async function notifyCallEnded() {
-        if (callAlreadyEnded || !callId || !sbUrl || !sbKey || !sbToken) return;
-        callAlreadyEnded = true;
-        try {
-            await fetch(`${sbUrl}/rest/v1/calls?id=eq.${callId}`, {
-                method: 'PATCH',
-                headers: {
-                    'apikey': sbKey,
-                    'Authorization': `Bearer ${sbToken}`,
-                    'Content-Type': 'application/json',
-                    'Prefer': 'return=minimal',
-                },
-                body: JSON.stringify({ status: 'ended', ended_at: new Date().toISOString() }),
-            });
-            log("📤 Statut 'terminé' envoyé à l'application principale.");
-        } catch (e) {
-            log("⚠️ Impossible de notifier l'app principale : " + e.message);
-        }
-    }
-
-    log("Démarrage. showVideo=" + showVideo);
-    log("URL LiveKit: " + (livekitUrl ? livekitUrl : "MANQUANTE"));
-    log("Token présent: " + (token ? "oui (" + token.length + " caractères)" : "MANQUANT"));
-
-    const LK = LivekitClient;
-    log("Version livekit-client chargée: " + (LK.version || "inconnue"));
-    const room = new LK.Room();
-
-    const statusEl = document.getElementById('bnb-status');
-    const remoteVideoEl = document.getElementById('bnb-remote-video');
-    const remoteAudioEl = document.getElementById('bnb-remote-audio');
-    const localVideoEl = document.getElementById('bnb-local-video');
-    const localWrapper = document.getElementById('bnb-local-wrapper');
-
-    if (!showVideo) {
-        localWrapper.style.display = 'none';
-        document.getElementById('bnb-toggle-cam').style.display = 'none';
-    }
-
-    if (!livekitUrl || !token) {
-        statusEl.innerText = "❌ Lien d'appel invalide (paramètres manquants).";
-        log("ARRÊT : paramètres manquants.");
-        return;
-    }
-
-    // Écoute de TOUS les événements pertinents de la room, avant même
-    // de se connecter, pour ne rien manquer.
-    room.on(LK.RoomEvent.ConnectionStateChanged, (state) => {
-        log("État de connexion: " + state);
-    });
-    room.on(LK.RoomEvent.ParticipantConnected, (p) => {
-        log("👤 Participant connecté: " + p.identity);
-    });
-    room.on(LK.RoomEvent.ParticipantDisconnected, (p) => {
-        log("👤 Participant déconnecté: " + (p ? p.identity : "?"));
-        statusEl.innerText = "L'autre personne a quitté l'appel.";
-    });
-    room.on(LK.RoomEvent.TrackPublished, (publication, participant) => {
-        log("📡 Track PUBLIÉE par " + participant.identity + " (" + publication.kind + ")");
-    });
-    room.on(LK.RoomEvent.TrackSubscribed, (track, publication, participant) => {
-        log("✅ Track REÇUE de " + participant.identity + " (" + track.kind + ")");
-        statusEl.innerText = "En cours d'appel";
-        if (track.kind === 'video') {
-            track.attach(remoteVideoEl);
-        } else if (track.kind === 'audio') {
-            track.attach(remoteAudioEl);
-        }
-    });
-    room.on(LK.RoomEvent.TrackSubscriptionFailed, (trackSid, participant) => {
-        log("❌ ÉCHEC subscription track " + trackSid + " de " + participant.identity);
-    });
-    room.on(LK.RoomEvent.TrackUnpublished, (publication, participant) => {
-        log("📡 Track dépubliée par " + participant.identity);
-    });
-    room.on(LK.RoomEvent.LocalTrackPublished, (publication) => {
-        log("📤 MA track publiée: " + publication.kind);
-    });
-    room.on(LK.RoomEvent.MediaDevicesError, (e) => {
-        log("⚠️ Erreur périphérique média: " + e.message);
-    });
-    room.on(LK.RoomEvent.Disconnected, (reason) => {
-        log("Déconnecté. Raison: " + reason);
-        statusEl.innerText = "Appel terminé. Tu peux fermer cet onglet.";
-        notifyCallEnded();
-    });
-    room.on(LK.RoomEvent.Reconnecting, () => {
-        log("🔄 Reconnexion en cours...");
-    });
-    room.on(LK.RoomEvent.Reconnected, () => {
-        log("✅ Reconnecté.");
-    });
-
-    try {
-        log("Tentative de connexion à la room...");
-        await room.connect(livekitUrl, token);
-        log("✅ Connecté à la room. SID room: " + room.name);
-        log("Nombre de participants déjà présents: " + room.numParticipants);
-        statusEl.innerText = "Connecté. Activation du micro...";
-
-        try {
-            await room.localParticipant.setMicrophoneEnabled(true);
-            log("✅ Micro activé et publié.");
-            statusEl.innerText = "En attente de l'autre participant...";
-        } catch (micErr) {
-            log("❌ ERREUR micro: " + micErr.message);
-            statusEl.innerText = "⚠️ Micro refusé : " + micErr.message;
-        }
-
-        if (showVideo) {
-            try {
-                await room.localParticipant.setCameraEnabled(true);
-                log("✅ Caméra activée et publiée.");
-                const camPub = room.localParticipant.getTrackPublication(LK.Track.Source.Camera);
-                if (camPub && camPub.track) {
-                    camPub.track.attach(localVideoEl);
-                }
-            } catch (camErr) {
-                log("❌ ERREUR caméra: " + camErr.message);
-                statusEl.innerText = "⚠️ Caméra refusée : " + camErr.message;
+def create_call(conversation_id: str, caller_id: str, contact_id: str, call_type: str):
+    """Crée un appel en statut 'ringing'. Retourne (call_id, room_name)."""
+    supabase = get_supabase_client()
+    room_name = f"call_{uuid.uuid4()}"
+    result = (
+        supabase.table("calls")
+        .insert(
+            {
+                "conversation_id": conversation_id,
+                "caller_id": caller_id,
+                "call_type": call_type,
+                "room_name": room_name,
+                "status": "ringing",
+                "participants": [caller_id, contact_id],
             }
-        }
+        )
+        .execute()
+    )
+    call_row = result.data[0]
+    return call_row["id"], room_name
 
-        // Vérifie s'il y avait déjà des participants/tracks au moment
-        // de notre connexion (utile si l'autre est arrivé avant nous).
-        room.remoteParticipants.forEach((participant) => {
-            log("👤 Déjà présent: " + participant.identity);
-            participant.trackPublications.forEach((pub) => {
-                log("   -> track existante: " + pub.kind + " (souscrite: " + pub.isSubscribed + ")");
-            });
-        });
 
-    } catch (err) {
-        log("❌ ERREUR de connexion à la room: " + err.message);
-        statusEl.innerText = "❌ Erreur de connexion : " + err.message;
-    }
+def get_incoming_call(user_id: str):
+    """Retourne le dernier appel entrant (status='ringing') où l'utilisateur
+    est participant mais n'est pas l'appelant, ou None s'il n'y en a pas."""
+    supabase = get_supabase_client()
+    result = (
+        supabase.table("calls")
+        .select("id, conversation_id, caller_id, call_type, room_name, status, started_at, profiles!calls_caller_id_fkey(username)")
+        .eq("status", "ringing")
+        .contains("participants", [user_id])
+        .neq("caller_id", user_id)
+        .order("started_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    rows = result.data or []
+    return rows[0] if rows else None
 
-    let micOn = true;
-    document.getElementById('bnb-toggle-mic').onclick = async function () {
-        micOn = !micOn;
-        await room.localParticipant.setMicrophoneEnabled(micOn);
-        this.style.opacity = micOn ? "1" : "0.5";
-        log("Micro " + (micOn ? "réactivé" : "coupé") + " manuellement.");
-    };
 
-    let camOn = true;
-    document.getElementById('bnb-toggle-cam').onclick = async function () {
-        camOn = !camOn;
-        await room.localParticipant.setCameraEnabled(camOn);
-        this.style.opacity = camOn ? "1" : "0.5";
-        log("Caméra " + (camOn ? "réactivée" : "coupée") + " manuellement.");
-    };
+def get_call_status(call_id: str):
+    supabase = get_supabase_client()
+    try:
+        result = supabase.table("calls").select("status").eq("id", call_id).maybe_single().execute()
+        return result.data["status"] if result and result.data else "ended"
+    except Exception:
+        return "ended"
 
-    document.getElementById('bnb-hangup').onclick = function () {
-        log("Raccroché manuellement.");
-        room.disconnect();
-        statusEl.innerText = "Appel terminé. Tu peux fermer cet onglet.";
-        notifyCallEnded();
-    };
 
-    // Caméra locale déplaçable (souris + tactile)
-    let dragging = false;
-    let offsetX = 0, offsetY = 0;
+def accept_call(call_id: str):
+    supabase = get_supabase_client()
+    supabase.table("calls").update({"status": "ongoing"}).eq("id", call_id).execute()
 
-    function startDrag(x, y) {
-        dragging = true;
-        const rect = localWrapper.getBoundingClientRect();
-        offsetX = x - rect.left;
-        offsetY = y - rect.top;
-        localWrapper.style.cursor = 'grabbing';
-    }
 
-    function doDrag(x, y) {
-        if (!dragging) return;
-        const rootRect = document.getElementById('bnb-call-root').getBoundingClientRect();
-        let newLeft = x - rootRect.left - offsetX;
-        let newTop = y - rootRect.top - offsetY;
-        newLeft = Math.max(0, Math.min(newLeft, rootRect.width - localWrapper.offsetWidth));
-        newTop = Math.max(0, Math.min(newTop, rootRect.height - localWrapper.offsetHeight));
-        localWrapper.style.left = newLeft + 'px';
-        localWrapper.style.top = newTop + 'px';
-        localWrapper.style.right = 'auto';
-    }
+def decline_call(call_id: str):
+    supabase = get_supabase_client()
+    supabase.table("calls").update({"status": "declined"}).eq("id", call_id).execute()
 
-    function endDrag() {
-        dragging = false;
-        localWrapper.style.cursor = 'grab';
-    }
 
-    localWrapper.addEventListener('mousedown', (e) => startDrag(e.clientX, e.clientY));
-    document.addEventListener('mousemove', (e) => doDrag(e.clientX, e.clientY));
-    document.addEventListener('mouseup', endDrag);
+def end_call(call_id: str, room_name: str = None):
+    """Marque l'appel comme terminé en base, ET ferme réellement la salle
+    LiveKit côté serveur, pour déconnecter immédiatement l'autre personne
+    au lieu d'attendre un éventuel timeout réseau."""
+    from datetime import datetime, timezone
+    supabase = get_supabase_client()
+    supabase.table("calls").update(
+        {"status": "ended", "ended_at": datetime.now(timezone.utc).isoformat()}
+    ).eq("id", call_id).execute()
 
-    localWrapper.addEventListener('touchstart', (e) => {
-        const t = e.touches[0];
-        startDrag(t.clientX, t.clientY);
-    }, {passive: true});
-    document.addEventListener('touchmove', (e) => {
-        const t = e.touches[0];
-        doDrag(t.clientX, t.clientY);
-    }, {passive: true});
-    document.addEventListener('touchend', endDrag);
-})();
-</script>
+    if room_name:
+        try:
+            import streamlit as st
+            from livekit import api as lk_api
 
-</body>
-</html>
+            lk_client = lk_api.LiveKitAPI(
+                url=st.secrets["livekit"]["url"].replace("wss://", "https://"),
+                api_key=st.secrets["livekit"]["api_key"],
+                api_secret=st.secrets["livekit"]["api_secret"],
+            )
+            lk_client.room.delete_room(lk_api.DeleteRoomRequest(room=room_name))
+        except Exception:
+            pass  # la salle a peut-être déjà été fermée, ou n'existe plus
