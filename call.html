@@ -56,14 +56,14 @@
   }
   #bnb-tab-hint {
     position: absolute;
-    top: 70px;
+    bottom: 78px;
     left: 24px;
-    right: 24px;
     color: white;
     background: rgba(108,92,231,0.85);
-    padding: 8px 14px;
-    border-radius: 12px;
-    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 10px;
+    font-size: 10px;
+    max-width: 60%;
   }
   #bnb-controls {
     position: absolute;
@@ -124,7 +124,7 @@
 
   <div id="bnb-status">Connexion...</div>
 
-  <div id="bnb-tab-hint">💡 Utilise le sélecteur d'onglets de Safari pour revenir à BnB Connect sans interrompre l'appel</div>
+  <div id="bnb-tab-hint">💡 Change d'onglet sans fermer l'appel</div>
 
   <div id="bnb-controls">
     <button class="bnb-btn" id="bnb-toggle-mic">🎤</button>
@@ -193,6 +193,27 @@
         }
     }
 
+    let callAlreadyMarkedOngoing = false;
+    async function notifyCallOngoing() {
+        if (callAlreadyMarkedOngoing || !callId || !sbUrl || !sbKey || !sbToken) return;
+        callAlreadyMarkedOngoing = true;
+        try {
+            await fetch(`${sbUrl}/rest/v1/calls?id=eq.${callId}`, {
+                method: 'PATCH',
+                headers: {
+                    'apikey': sbKey,
+                    'Authorization': `Bearer ${sbToken}`,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=minimal',
+                },
+                body: JSON.stringify({ status: 'ongoing' }),
+            });
+            log("📤 Statut 'en cours' confirmé par le serveur.");
+        } catch (e) {
+            log("⚠️ Impossible de notifier le démarrage : " + e.message);
+        }
+    }
+
     log("Démarrage. showVideo=" + showVideo);
     log("URL LiveKit: " + (livekitUrl ? livekitUrl : "MANQUANTE"));
     log("Token présent: " + (token ? "oui (" + token.length + " caractères)" : "MANQUANT"));
@@ -225,6 +246,8 @@
     });
     room.on(LK.RoomEvent.ParticipantConnected, (p) => {
         log("👤 Participant connecté: " + p.identity);
+        statusEl.innerText = "Connecté avec l'autre personne...";
+        notifyCallOngoing();
     });
     room.on(LK.RoomEvent.ParticipantDisconnected, (p) => {
         log("👤 Participant déconnecté: " + (p ? p.identity : "?"));
@@ -236,6 +259,7 @@
     room.on(LK.RoomEvent.TrackSubscribed, (track, publication, participant) => {
         log("✅ Track REÇUE de " + participant.identity + " (" + track.kind + ")");
         statusEl.innerText = "En cours d'appel";
+        notifyCallOngoing();
         if (track.kind === 'video') {
             track.attach(remoteVideoEl);
         } else if (track.kind === 'audio') {
@@ -298,6 +322,10 @@
 
         // Vérifie s'il y avait déjà des participants/tracks au moment
         // de notre connexion (utile si l'autre est arrivé avant nous).
+        if (room.remoteParticipants.size > 0) {
+            statusEl.innerText = "Connecté avec l'autre personne...";
+            notifyCallOngoing();
+        }
         room.remoteParticipants.forEach((participant) => {
             log("👤 Déjà présent: " + participant.identity);
             participant.trackPublications.forEach((pub) => {
