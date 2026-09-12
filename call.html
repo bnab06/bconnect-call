@@ -114,6 +114,7 @@
   <div id="bnb-status">Connexion...</div>
 
   <div id="bnb-controls">
+    <a class="bnb-btn" id="bnb-back-to-app" href="#" style="display:flex; align-items:center; justify-content:center; text-decoration:none;">↩️</a>
     <button class="bnb-btn" id="bnb-toggle-mic">🎤</button>
     <button class="bnb-btn" id="bnb-toggle-cam">📷</button>
     <button class="bnb-btn hangup" id="bnb-hangup">📵</button>
@@ -150,6 +151,14 @@
     const sbUrl = params.get('sb_url');
     const sbKey = params.get('sb_key');
     const sbToken = params.get('sb_token');
+    const appUrl = params.get('app_url');
+
+    const backBtn = document.getElementById('bnb-back-to-app');
+    if (appUrl) {
+        backBtn.href = appUrl;
+    } else {
+        backBtn.style.display = 'none';
+    }
 
     let callAlreadyEnded = false;
     async function notifyCallEnded() {
@@ -313,8 +322,14 @@
         log("Caméra " + (camOn ? "réactivée" : "coupée") + " manuellement.");
     };
 
-    document.getElementById('bnb-hangup').onclick = function () {
+    document.getElementById('bnb-hangup').onclick = async function () {
         log("Raccroché manuellement.");
+        try {
+            await room.localParticipant.setCameraEnabled(false);
+            await room.localParticipant.setMicrophoneEnabled(false);
+        } catch (e) {
+            log("⚠️ Erreur en coupant caméra/micro : " + e.message);
+        }
         room.disconnect();
         statusEl.innerText = "Appel terminé. Tu peux fermer cet onglet.";
         notifyCallEnded();
