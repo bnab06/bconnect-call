@@ -153,10 +153,13 @@
 
     let callAlreadyEnded = false;
     async function notifyCallEnded() {
-        if (callAlreadyEnded || !callId || !sbUrl || !sbKey || !sbToken) return;
+        if (callAlreadyEnded || !callId || !sbUrl || !sbKey || !sbToken) {
+            log("⚠️ Notification impossible : paramètre manquant (callId=" + callId + ", sbUrl=" + (sbUrl ? "ok" : "manquant") + ", sbKey=" + (sbKey ? "ok" : "manquant") + ", sbToken=" + (sbToken ? "ok" : "manquant") + ")");
+            return;
+        }
         callAlreadyEnded = true;
         try {
-            await fetch(`${sbUrl}/rest/v1/calls?id=eq.${callId}`, {
+            const resp = await fetch(`${sbUrl}/rest/v1/calls?id=eq.${callId}`, {
                 method: 'PATCH',
                 headers: {
                     'apikey': sbKey,
@@ -166,7 +169,12 @@
                 },
                 body: JSON.stringify({ status: 'ended', ended_at: new Date().toISOString() }),
             });
-            log("📤 Statut 'terminé' envoyé à l'application principale.");
+            if (resp.ok) {
+                log("📤 Statut 'terminé' confirmé par le serveur (code " + resp.status + ").");
+            } else {
+                const errText = await resp.text();
+                log("❌ Le serveur a REJETÉ la mise à jour (code " + resp.status + "): " + errText);
+            }
         } catch (e) {
             log("⚠️ Impossible de notifier l'app principale : " + e.message);
         }
