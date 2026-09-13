@@ -207,7 +207,7 @@
                     'Content-Type': 'application/json',
                     'Prefer': 'return=minimal',
                 },
-                body: JSON.stringify({ status: 'ongoing' }),
+                body: JSON.stringify({ status: 'ongoing', answered: true }),
             });
             console.log("📤 Statut 'en cours' confirmé par le serveur.");
         } catch (e) {
