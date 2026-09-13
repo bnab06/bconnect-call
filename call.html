@@ -163,6 +163,7 @@
     const sbUrl = params.get('sb_url');
     const sbKey = params.get('sb_key');
     const sbToken = params.get('sb_token');
+    const peerName = params.get('peer_name') || "L'autre personne";
 
     let callAlreadyEnded = false;
     async function notifyCallEnded() {
@@ -214,6 +215,38 @@
         }
     }
 
+    // Surveille le statut de l'appel côté app principale : si l'autre
+    // personne refuse ou raccroche depuis l'app (avant même d'avoir
+    // rejoint cette page), on se déconnecte proprement au lieu de rester
+    // bloqué en "attente" indéfiniment.
+    let statusCheckInterval = null;
+    if (callId && sbUrl && sbKey && sbToken) {
+        statusCheckInterval = setInterval(async () => {
+            try {
+                const resp = await fetch(`${sbUrl}/rest/v1/calls?id=eq.${callId}&select=status`, {
+                    headers: { 'apikey': sbKey, 'Authorization': `Bearer ${sbToken}` },
+                });
+                const rows = await resp.json();
+                const remoteStatus = rows && rows[0] ? rows[0].status : null;
+                if (remoteStatus === 'declined' || remoteStatus === 'ended') {
+                    log("📥 Statut distant détecté : " + remoteStatus + ". Déconnexion...");
+                    clearInterval(statusCheckInterval);
+                    try {
+                        await room.localParticipant.setCameraEnabled(false);
+                        await room.localParticipant.setMicrophoneEnabled(false);
+                    } catch (e) {}
+                    room.disconnect();
+                    statusEl.innerText = remoteStatus === 'declined'
+                        ? peerName + " a refusé l'appel."
+                        : "Appel terminé. Tu peux fermer cet onglet.";
+                    callAlreadyEnded = true;
+                }
+            } catch (e) {
+                // Erreur réseau ponctuelle, sans gravité : on réessaiera au prochain cycle.
+            }
+        }, 3000);
+    }
+
     log("Démarrage. showVideo=" + showVideo);
     log("URL LiveKit: " + (livekitUrl ? livekitUrl : "MANQUANTE"));
     log("Token présent: " + (token ? "oui (" + token.length + " caractères)" : "MANQUANT"));
@@ -246,12 +279,12 @@
     });
     room.on(LK.RoomEvent.ParticipantConnected, (p) => {
         log("👤 Participant connecté: " + p.identity);
-        statusEl.innerText = "Connecté avec l'autre personne...";
+        statusEl.innerText = "Connecté avec " + peerName + "...";
         notifyCallOngoing();
     });
     room.on(LK.RoomEvent.ParticipantDisconnected, (p) => {
         log("👤 Participant déconnecté: " + (p ? p.identity : "?"));
-        statusEl.innerText = "L'autre personne a quitté l'appel.";
+        statusEl.innerText = peerName + " a quitté l'appel.";
     });
     room.on(LK.RoomEvent.TrackPublished, (publication, participant) => {
         log("📡 Track PUBLIÉE par " + participant.identity + " (" + publication.kind + ")");
@@ -323,7 +356,7 @@
         // Vérifie s'il y avait déjà des participants/tracks au moment
         // de notre connexion (utile si l'autre est arrivé avant nous).
         if (room.remoteParticipants.size > 0) {
-            statusEl.innerText = "Connecté avec l'autre personne...";
+            statusEl.innerText = "Connecté avec " + peerName + "...";
             notifyCallOngoing();
         }
         room.remoteParticipants.forEach((participant) => {
@@ -356,6 +389,7 @@
 
     document.getElementById('bnb-hangup').onclick = async function () {
         log("Raccroché manuellement.");
+        if (statusCheckInterval) clearInterval(statusCheckInterval);
         try {
             await room.localParticipant.setCameraEnabled(false);
             await room.localParticipant.setMicrophoneEnabled(false);
