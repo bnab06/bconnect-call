@@ -1,789 +1,454 @@
-"""
-app.py
-Point d'entrée de BnB Connect.
-Affiche le formulaire de connexion/inscription tant que l'utilisateur
-n'est pas authentifié, sinon donne accès au reste de l'application.
-"""
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>BnB Connect — Appel</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #1E1E2E;
+    font-family: -apple-system, sans-serif;
+    height: 100%;
+  }
+  #bnb-call-root {
+    position: relative;
+    width: 100vw;
+    height: 60vh;
+    background: #1E1E2E;
+    overflow: hidden;
+  }
+  #bnb-remote-video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    background: #111;
+  }
+  #bnb-local-wrapper {
+    position: absolute;
+    top: 24px;
+    right: 24px;
+    width: 100px;
+    height: 130px;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 2px solid white;
+    cursor: grab;
+    touch-action: none;
+    background: #333;
+  }
+  #bnb-local-video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  #bnb-status {
+    position: absolute;
+    top: 24px;
+    left: 24px;
+    color: white;
+    background: rgba(0,0,0,0.55);
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 13px;
+    max-width: 55%;
+  }
+  #bnb-tab-hint {
+    position: absolute;
+    bottom: 78px;
+    left: 24px;
+    color: white;
+    background: rgba(108,92,231,0.85);
+    padding: 4px 10px;
+    border-radius: 10px;
+    font-size: 10px;
+    max-width: 60%;
+  }
+  #bnb-controls {
+    position: absolute;
+    bottom: 16px;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+  }
+  .bnb-btn {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    border: none;
+    background: #6C5CE7;
+    color: white;
+    font-size: 20px;
+  }
+  .bnb-btn.hangup {
+    background: #E74C3C;
+  }
+  #bnb-debug-panel {
+    width: 100%;
+    height: 40vh;
+    background: #000;
+    color: #0F0;
+    font-family: monospace;
+    font-size: 11px;
+    overflow-y: scroll;
+    padding: 8px;
+    box-sizing: border-box;
+    -webkit-overflow-scrolling: touch;
+  }
+  #bnb-debug-panel div {
+    margin-bottom: 3px;
+    word-wrap: break-word;
+  }
+  #bnb-debug-header {
+    background: #333;
+    color: white;
+    font-size: 12px;
+    padding: 6px 8px;
+    display: flex;
+    justify-content: space-between;
+  }
+</style>
+</head>
+<body>
 
-import streamlit as st
-import streamlit.components.v1 as components
-import time
+<div id="bnb-call-root">
+  <video id="bnb-remote-video" autoplay playsinline></video>
+  <audio id="bnb-remote-audio" autoplay></audio>
 
-BEEP_SCRIPT = """
+  <div id="bnb-local-wrapper">
+    <video id="bnb-local-video" autoplay playsinline muted></video>
+  </div>
+
+  <div id="bnb-status">Connexion...</div>
+
+  <div id="bnb-tab-hint">💡 Change d'onglet sans fermer l'appel</div>
+
+  <div id="bnb-controls">
+    <button class="bnb-btn" id="bnb-toggle-mic">🎤</button>
+    <button class="bnb-btn" id="bnb-toggle-cam">📷</button>
+    <button class="bnb-btn hangup" id="bnb-hangup">📵</button>
+  </div>
+</div>
+
+<div id="bnb-debug-header">
+  <span>🔧 Journal technique (à copier si besoin)</span>
+  <span id="bnb-copy-hint">Maintiens le doigt pour copier</span>
+</div>
+<div id="bnb-debug-panel"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.0/dist/livekit-client.umd.min.js"></script>
 <script>
-try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    function bnbBeep(delay) {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.frequency.value = 880;
-        gain.gain.setValueAtTime(0.001, ctx.currentTime + delay);
-        gain.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime + delay + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.3);
-        osc.start(ctx.currentTime + delay);
-        osc.stop(ctx.currentTime + delay + 0.3);
+(async function () {
+    const debugPanel = document.getElementById('bnb-debug-panel');
+    function log(msg) {
+        const line = document.createElement('div');
+        const time = new Date().toLocaleTimeString();
+        line.textContent = `[${time}] ${msg}`;
+        debugPanel.appendChild(line);
+        debugPanel.scrollTop = debugPanel.scrollHeight;
+        console.log(msg);
     }
-    bnbBeep(0);
-    bnbBeep(0.4);
-} catch (e) { console.error(e); }
-</script>
-"""
-from datetime import datetime
-from utils.branding import apply_page_config, render_footer, render_header, render_chat_bubble, render_avatar_html
-from utils.presence import touch_last_seen, status_label
-from utils.livekit_token import generate_livekit_token, get_livekit_url
-from utils.call_widget import render_call_widget_html
-from auth import sign_up, sign_in, sign_out, send_password_reset
-from calls import (
-    create_call,
-    get_incoming_call,
-    get_call_status,
-    accept_call,
-    decline_call,
-    end_call,
-)
-from conversations import (
-    get_or_create_direct_conversation,
-    send_message,
-    get_messages,
-    get_my_conversations,
-    delete_conversation_for_me,
-    mark_as_read,
-)
-from utils.storage import upload_media, upload_avatar
-from contacts import (
-    search_users_by_username,
-    send_contact_request,
-    accept_contact_request,
-    block_contact,
-    unblock_contact,
-    delete_contact,
-    get_my_contacts,
-    get_pending_requests_received,
-    get_pending_requests_sent,
-    get_blocked_contacts,
-    find_relation,
-    get_contact_last_seen,
-)
-from user_profile import get_profile, update_username, update_bio, update_password, update_avatar_url, remove_avatar, delete_account
-
-apply_page_config("Accueil")
-
-if "user" not in st.session_state:
-    st.session_state.user = None
-
-# Si on arrive depuis le lien de confirmation d'email (?confirmed=1),
-# on affiche un message de succès avant de continuer vers l'écran de connexion.
-if st.query_params.get("confirmed") == "1" and not st.session_state.get("email_confirmed_dismissed"):
-    render_header("Email vérifié")
-    st.success("✅ Ton email a été vérifié avec succès !")
-    if st.button("OK, continuer", use_container_width=True):
-        st.session_state.email_confirmed_dismissed = True
-        st.query_params.clear()
-        st.rerun()
-    render_footer()
-    st.stop()
-
-
-def show_auth_screen():
-    render_header("Connecte-toi ou crée un compte pour commencer à discuter")
-
-    tab_login, tab_signup, tab_forgot = st.tabs(
-        ["🔑 Connexion", "🆕 Inscription", "❓ Mot de passe oublié"]
-    )
-
-    with tab_login:
-        with st.form("login_form"):
-            email = st.text_input("Email", key="login_email")
-            password = st.text_input("Mot de passe", type="password", key="login_pwd")
-            submitted = st.form_submit_button("Se connecter", use_container_width=True)
-            if submitted:
-                ok, result = sign_in(email, password)
-                if ok:
-                    st.session_state.user = result.user
-                    st.success("Connexion réussie !")
-                    st.rerun()
-                else:
-                    st.error(f"Échec de connexion : {result}")
-
-    with tab_signup:
-        with st.form("signup_form"):
-            username = st.text_input("Pseudo", key="signup_username")
-            email = st.text_input("Email", key="signup_email")
-            password = st.text_input("Mot de passe", type="password", key="signup_pwd")
-            password2 = st.text_input(
-                "Confirme le mot de passe", type="password", key="signup_pwd2"
-            )
-            submitted = st.form_submit_button("Créer mon compte", use_container_width=True)
-            if submitted:
-                if not username or not email or not password:
-                    st.warning("Merci de remplir tous les champs.")
-                elif password != password2:
-                    st.warning("Les mots de passe ne correspondent pas.")
-                elif len(password) < 8:
-                    st.warning("Le mot de passe doit faire au moins 8 caractères.")
-                else:
-                    ok, result = sign_up(email, password, username)
-                    if ok:
-                        st.success(
-                            "Compte créé ! Va vérifier ta boîte mail pour confirmer "
-                            "ton adresse avant de pouvoir te connecter."
-                        )
-                    else:
-                        st.error(f"Échec de l'inscription : {result}")
-
-    with tab_forgot:
-        with st.form("forgot_form"):
-            email = st.text_input("Ton email", key="forgot_email")
-            submitted = st.form_submit_button("Envoyer le lien de réinitialisation", use_container_width=True)
-            if submitted:
-                ok, msg = send_password_reset(email)
-                if ok:
-                    st.success(msg)
-                else:
-                    st.error(msg)
-
-    render_footer()
-
-
-def show_my_contacts_section(user_id: str):
-    st.subheader("Mes contacts")
-    my_contacts = get_my_contacts(user_id)
-
-    if not my_contacts:
-        st.caption("Tu n'as pas encore de contact. Utilise l'onglet 'Rechercher' pour en ajouter.")
-
-    for row in my_contacts:
-        profile = row.get("profiles") or {}
-        with st.container(border=True):
-            col_avatar, col1, col2, col3 = st.columns([0.6, 2.4, 2, 2])
-            with col_avatar:
-                st.markdown(render_avatar_html(profile.get("avatar_url"), profile.get("username", "?"), size=40), unsafe_allow_html=True)
-            with col1:
-                st.write(f"**{profile.get('username', '—')}**")
-            with col2:
-                st.caption(status_label(profile.get("last_seen")))
-            with col3:
-                b1, b2 = st.columns(2)
-                if b1.button("🚫 Bloquer", key=f"block_{row['id']}"):
-                    st.session_state[f"confirm_block_{row['id']}"] = True
-                if b2.button("🗑️ Suppr.", key=f"delete_{row['id']}"):
-                    st.session_state[f"confirm_delete_{row['id']}"] = True
-
-            if st.session_state.get(f"confirm_block_{row['id']}"):
-                st.warning(f"Bloquer {profile.get('username', 'ce contact')} ? Il/elle ne pourra plus t'envoyer de messages.")
-                cb1, cb2 = st.columns(2)
-                if cb1.button("✅ Confirmer le blocage", key=f"confirm_block_yes_{row['id']}"):
-                    ok, msg = block_contact(user_id, row["contact_id"], existing_row_id=row["id"])
-                    st.toast(msg)
-                    del st.session_state[f"confirm_block_{row['id']}"]
-                    st.rerun()
-                if cb2.button("Annuler", key=f"confirm_block_no_{row['id']}"):
-                    del st.session_state[f"confirm_block_{row['id']}"]
-                    st.rerun()
-
-            if st.session_state.get(f"confirm_delete_{row['id']}"):
-                st.warning(f"Supprimer {profile.get('username', 'ce contact')} de tes contacts ?")
-                cd1, cd2 = st.columns(2)
-                if cd1.button("✅ Confirmer la suppression", key=f"confirm_delete_yes_{row['id']}"):
-                    ok, msg = delete_contact(row["id"])
-                    st.toast(msg)
-                    del st.session_state[f"confirm_delete_{row['id']}"]
-                    st.rerun()
-                if cd2.button("Annuler", key=f"confirm_delete_no_{row['id']}"):
-                    del st.session_state[f"confirm_delete_{row['id']}"]
-                    st.rerun()
-
-
-def show_requests_section(user_id: str):
-    st.subheader("Demandes reçues")
-    received = get_pending_requests_received(user_id)
-    if not received:
-        st.caption("Aucune demande en attente.")
-    for row in received:
-        profile = row.get("profiles") or {}
-        with st.container(border=True):
-            col_avatar, col1, col2 = st.columns([0.6, 2.4, 2])
-            with col_avatar:
-                st.markdown(render_avatar_html(profile.get("avatar_url"), profile.get("username", "?"), size=40), unsafe_allow_html=True)
-            with col1:
-                st.write(f"**{profile.get('username', '—')}** souhaite t'ajouter.")
-            with col2:
-                b1, b2 = st.columns(2)
-                if b1.button("✅ Accepter", key=f"accept_{row['id']}"):
-                    ok, msg = accept_contact_request(row["id"])
-                    st.toast(msg)
-                    st.rerun()
-                if b2.button("❌ Refuser", key=f"refuse_{row['id']}"):
-                    ok, msg = delete_contact(row["id"])
-                    st.toast(msg)
-                    st.rerun()
-
-    st.subheader("Demandes envoyées")
-    sent = get_pending_requests_sent(user_id)
-    if not sent:
-        st.caption("Aucune demande envoyée en attente.")
-    for row in sent:
-        profile = row.get("profiles") or {}
-        st.write(f"En attente de réponse : **{profile.get('username', '—')}**")
-
-
-def show_search_section(user_id: str):
-    st.subheader("Rechercher un utilisateur")
-    query = st.text_input("Recherche", key="search_query", placeholder="Tape un nom à rechercher")
-    if query:
-        results = search_users_by_username(query, user_id)
-        if not results:
-            st.caption("Aucun utilisateur trouvé.")
-        for r in results:
-            with st.container(border=True):
-                col_avatar, col1, col2, col3 = st.columns([0.6, 2.4, 2, 2])
-                with col_avatar:
-                    st.markdown(render_avatar_html(r.get("avatar_url"), r.get("username", "?"), size=40), unsafe_allow_html=True)
-                with col1:
-                    st.write(f"**{r['username']}**")
-                with col2:
-                    st.caption(status_label(r.get("last_seen")))
-                with col3:
-                    relation = find_relation(user_id, r["id"])
-                    if relation is None:
-                        if st.button("➕ Ajouter", key=f"add_{r['id']}"):
-                            ok, msg = send_contact_request(user_id, r["id"])
-                            st.toast(msg)
-                            st.rerun()
-                    elif relation["status"] == "pending":
-                        st.caption("Demande en attente")
-                    elif relation["status"] == "accepted":
-                        st.caption("✅ Déjà contact")
-                    elif relation["status"] == "blocked":
-                        st.caption("🚫 Bloqué")
-
-
-def show_blocked_section(user_id: str):
-    st.subheader("Contacts bloqués")
-    blocked = get_blocked_contacts(user_id)
-    if not blocked:
-        st.caption("Aucun contact bloqué.")
-    for row in blocked:
-        profile = row.get("profiles") or {}
-        with st.container(border=True):
-            col_avatar, col1, col2 = st.columns([0.6, 2.4, 2])
-            with col_avatar:
-                st.markdown(render_avatar_html(profile.get("avatar_url"), profile.get("username", "?"), size=40), unsafe_allow_html=True)
-            with col1:
-                st.write(f"**{profile.get('username', '—')}**")
-            with col2:
-                if st.button("🔓 Débloquer", key=f"unblock_{row['id']}"):
-                    ok, msg = unblock_contact(row["id"])
-                    st.toast(msg)
-                    st.rerun()
-
-
-def show_contacts_tab(user_id: str):
-    inner_tabs = st.tabs(["👥 Mes contacts", "📨 Demandes", "🔍 Rechercher", "🚫 Bloqués"])
-    with inner_tabs[0]:
-        show_my_contacts_section(user_id)
-    with inner_tabs[1]:
-        show_requests_section(user_id)
-    with inner_tabs[2]:
-        show_search_section(user_id)
-    with inner_tabs[3]:
-        show_blocked_section(user_id)
-
-
-@st.fragment(run_every=4)
-def render_messages_fragment(conv_id: str, user_id: str):
-    """Affiche les messages d'une conversation et se rafraîchit tout seul
-    toutes les 4 secondes, sans jamais recharger le reste de la page
-    (contrairement à un rerun global, ceci ne perturbe pas les autres
-    interactions en cours ailleurs sur l'écran). Rafraîchit aussi la
-    présence (en ligne/hors ligne) du contact et la sienne à chaque tick."""
-    touch_last_seen(user_id)
-    contact_id = st.session_state.get("active_contact_id")
-    if contact_id:
-        st.caption(status_label(get_contact_last_seen(contact_id)))
-
-    messages = get_messages(conv_id)
-    chat_box = st.container(height=420)
-    with chat_box:
-        for m in messages:
-            is_mine = m["sender_id"] == user_id
-            try:
-                dt = datetime.fromisoformat(m["created_at"].replace("Z", "+00:00"))
-                time_str = dt.strftime("%H:%M")
-            except (ValueError, KeyError):
-                time_str = ""
-
-            if m["message_type"] == "text":
-                render_chat_bubble(m["content"], is_mine, time_str)
-            elif m["message_type"] == "audio":
-                align = "flex-end" if is_mine else "flex-start"
-                st.markdown(
-                    f"""
-                    <div style="display:flex; justify-content:{align}; margin:6px 0;">
-                      <div>
-                        <audio src="{m['media_url']}" controls style="max-width:220px;"></audio>
-                        <div style="text-align:{'right' if is_mine else 'left'}; font-size:10px; color:#888; margin-top:2px;">{time_str}</div>
-                      </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-            elif m["message_type"] == "video":
-                align = "flex-end" if is_mine else "flex-start"
-                st.markdown(
-                    f"""
-                    <div style="display:flex; justify-content:{align}; margin:6px 0;">
-                      <div>
-                        <video src="{m['media_url']}" controls style="width:160px; border-radius:10px; display:block;"></video>
-                        <div style="text-align:{'right' if is_mine else 'left'}; font-size:10px; color:#888; margin-top:2px;">{time_str}</div>
-                      </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-
-
-
-
-
-def show_chat_tab(user_id: str):
-    if "active_conversation" not in st.session_state:
-        st.session_state.active_conversation = None
-    if "active_contact_name" not in st.session_state:
-        st.session_state.active_contact_name = None
-
-    col_list, col_chat = st.columns([1, 2])
-
-    with col_list:
-        st.caption("💬 Discussions en cours")
-        conversations = get_my_conversations(user_id)
-        if not conversations:
-            st.caption("Aucune discussion pour l'instant.")
-        for conv in conversations:
-            other = conv.get("other_profile") or {}
-            name = other.get("username", "?")
-            last_msg = conv.get("last_message")
-            if last_msg:
-                if last_msg.get("content"):
-                    preview = last_msg["content"][:30]
-                elif last_msg.get("message_type") == "audio":
-                    preview = "🎤 Message vocal"
-                elif last_msg.get("message_type") == "video":
-                    preview = "📹 Message vidéo"
-                else:
-                    preview = "..."
-            else:
-                preview = "..."
-            col_avatar, col_btn = st.columns([0.5, 3.5])
-            with col_avatar:
-                st.markdown(render_avatar_html(other.get("avatar_url"), name, size=36), unsafe_allow_html=True)
-            with col_btn:
-                if st.button(f"{name}\n{preview}", key=f"openconv_{conv['conversation_id']}", use_container_width=True):
-                    st.session_state.active_conversation = conv["conversation_id"]
-                    st.session_state.active_contact_name = name
-                    st.session_state.active_contact_id = (other or {}).get("id")
-                    mark_as_read(conv["conversation_id"], user_id)
-                    st.rerun()
-
-        st.divider()
-        st.caption("➕ Démarrer une nouvelle discussion")
-        my_contacts = get_my_contacts(user_id)
-        if not my_contacts:
-            st.caption("Ajoute des contacts pour pouvoir discuter.")
-        for row in my_contacts:
-            profile = row.get("profiles") or {}
-            col_avatar, col_btn = st.columns([0.5, 3.5])
-            with col_avatar:
-                st.markdown(render_avatar_html(profile.get("avatar_url"), profile.get("username", "?"), size=36), unsafe_allow_html=True)
-            with col_btn:
-                if st.button(f"💬 {profile.get('username', '?')}", key=f"startchat_{row['contact_id']}", use_container_width=True):
-                    conv_id = get_or_create_direct_conversation(user_id, row["contact_id"])
-                    st.session_state.active_conversation = conv_id
-                    st.session_state.active_contact_name = profile.get("username")
-                    st.session_state.active_contact_id = row["contact_id"]
-                    st.rerun()
-
-    with col_chat:
-        conv_id = st.session_state.active_conversation
-        if not conv_id:
-            st.info("Sélectionne une discussion à gauche, ou démarres-en une nouvelle.")
-            return
-
-        has_pending_confirmation = st.session_state.get(f"confirm_delete_conv_{conv_id}", False)
-
-        header_col, call_audio_col, call_video_col, delete_col = st.columns([3, 1, 1, 1])
-        with header_col:
-            st.write(f"### 💬 {st.session_state.active_contact_name}")
-        with call_audio_col:
-            if st.button("📞", key=f"call_audio_{conv_id}", help="Appel audio"):
-                contact_id = st.session_state.get("active_contact_id")
-                call_id, room_name = create_call(conv_id, user_id, contact_id, "audio")
-                st.session_state.active_call = {
-                    "call_id": call_id,
-                    "room_name": room_name,
-                    "call_type": "audio",
-                }
-                call_url = build_call_url(st.session_state.active_call, user_id, st.session_state.active_contact_name)
-                trigger_auto_open_call(call_url)
-                st.rerun()
-        with call_video_col:
-            if st.button("🎥", key=f"call_video_{conv_id}", help="Appel vidéo"):
-                contact_id = st.session_state.get("active_contact_id")
-                call_id, room_name = create_call(conv_id, user_id, contact_id, "video")
-                st.session_state.active_call = {
-                    "call_id": call_id,
-                    "room_name": room_name,
-                    "call_type": "video",
-                }
-                call_url = build_call_url(st.session_state.active_call, user_id, st.session_state.active_contact_name)
-                trigger_auto_open_call(call_url)
-                st.rerun()
-        with delete_col:
-            if st.button("🗑️ Supprimer"):
-                st.session_state[f"confirm_delete_conv_{conv_id}"] = True
-
-        if st.session_state.get("active_call"):
-            st.caption("📞 Appel en cours — regarde en haut de la page.")
-
-        if st.session_state.get(f"confirm_delete_conv_{conv_id}"):
-            st.warning("Supprimer cette discussion ? Elle sera masquée uniquement pour toi, l'autre personne garde son historique.")
-            cc1, cc2 = st.columns(2)
-            if cc1.button("✅ Confirmer la suppression", key=f"confirm_delconv_yes_{conv_id}"):
-                delete_conversation_for_me(conv_id, user_id)
-                st.session_state.active_conversation = None
-                del st.session_state[f"confirm_delete_conv_{conv_id}"]
-                st.rerun()
-            if cc2.button("Annuler", key=f"confirm_delconv_no_{conv_id}"):
-                del st.session_state[f"confirm_delete_conv_{conv_id}"]
-                st.rerun()
-
-        render_messages_fragment(conv_id, user_id)
-
-        new_msg = st.chat_input("Écris ton message...")
-        if new_msg:
-            send_message(conv_id, user_id, content=new_msg, message_type="text")
-            st.rerun()
-
-        with st.expander("🎤 Message vocal / 📹 Message vidéo"):
-            audio_version_key = f"audio_version_{conv_id}"
-            if audio_version_key not in st.session_state:
-                st.session_state[audio_version_key] = 0
-
-            video_version_key = f"video_version_{conv_id}"
-            if video_version_key not in st.session_state:
-                st.session_state[video_version_key] = 0
-
-            tab_audio, tab_video = st.tabs(["🎤 Vocal", "📹 Vidéo"])
-
-            with tab_audio:
-                audio_value = st.audio_input(
-                    "Enregistrer un vocal",
-                    key=f"audio_{conv_id}_{st.session_state[audio_version_key]}",
-                    label_visibility="collapsed",
-                )
-                if audio_value is not None:
-                    if st.button("✅ Envoyer le vocal", key=f"send_audio_{conv_id}", use_container_width=True):
-                        url = upload_media(audio_value.getvalue(), "audio.wav", conv_id, "audio")
-                        send_message(conv_id, user_id, message_type="audio", media_url=url)
-                        st.session_state[audio_version_key] += 1
-                        st.rerun()
-
-            with tab_video:
-                video_file = st.file_uploader(
-                    "Envoyer une vidéo",
-                    type=["mp4", "mov", "webm"],
-                    key=f"video_{conv_id}_{st.session_state[video_version_key]}",
-                    label_visibility="collapsed",
-                )
-                if video_file is not None:
-                    if st.button("✅ Envoyer la vidéo", key=f"send_video_{conv_id}", use_container_width=True):
-                        url = upload_media(video_file.getvalue(), video_file.name, conv_id, "video")
-                        send_message(conv_id, user_id, message_type="video", media_url=url)
-                        st.session_state[video_version_key] += 1
-                        st.rerun()
-
-
-def show_profile_tab(user_id: str):
-    profile = get_profile(user_id)
-    if not profile:
-        st.error("Impossible de charger le profil.")
-        return
-
-    st.subheader("Mon profil")
-    st.caption(f"Email : {profile.get('email')}")
-
-    avatar_url = profile.get("avatar_url")
-    if avatar_url:
-        st.markdown(
-            f"""<img src="{avatar_url}" style="width:100px; height:100px; border-radius:50%; object-fit:cover; display:block; margin-bottom:10px;">""",
-            unsafe_allow_html=True,
-        )
-    else:
-        initial = (profile.get("username") or "?")[0].upper()
-        st.markdown(
-            f"""<div style="width:100px; height:100px; border-radius:50%; background:#6C5CE7; color:white;
-            display:flex; align-items:center; justify-content:center; font-size:36px; font-weight:700; margin-bottom:10px;">{initial}</div>""",
-            unsafe_allow_html=True,
-        )
-
-    if "avatar_version" not in st.session_state:
-        st.session_state.avatar_version = 0
-
-    avatar_file = st.file_uploader(
-        "Changer ma photo de profil",
-        type=["jpg", "jpeg", "png", "webp"],
-        key=f"avatar_uploader_{st.session_state.avatar_version}",
-    )
-    col_upload, col_remove = st.columns(2)
-    if col_upload.button("📤 Mettre à jour l'avatar", use_container_width=True, disabled=avatar_file is None):
-        new_url = upload_avatar(avatar_file.getvalue(), avatar_file.name, user_id)
-        ok, msg = update_avatar_url(user_id, new_url)
-        if ok:
-            st.session_state.avatar_version += 1
-            st.success(msg)
-            st.rerun()
-        else:
-            st.error(msg)
-    if col_remove.button("🗑️ Supprimer l'avatar", use_container_width=True, disabled=not avatar_url):
-        ok, msg = remove_avatar(user_id)
-        if ok:
-            st.success(msg)
-            st.rerun()
-        else:
-            st.error(msg)
-
-    st.divider()
-
-    with st.form("update_username_form"):
-        new_username = st.text_input("Pseudo", value=profile.get("username", ""))
-        submitted = st.form_submit_button("Mettre à jour le pseudo")
-        if submitted:
-            ok, msg = update_username(user_id, new_username)
-            if ok:
-                st.success(msg)
-                st.rerun()
-            else:
-                st.error(msg)
-
-    with st.form("update_bio_form"):
-        new_bio = st.text_area("Bio", value=profile.get("bio") or "")
-        submitted = st.form_submit_button("Mettre à jour la bio")
-        if submitted:
-            ok, msg = update_bio(user_id, new_bio)
-            if ok:
-                st.success(msg)
-            else:
-                st.error(msg)
-
-    st.divider()
-    st.subheader("Changer le mot de passe")
-
-    if "show_password_form" not in st.session_state:
-        st.session_state.show_password_form = False
-
-    if not st.session_state.show_password_form:
-        if st.button("🔒 Changer mon mot de passe"):
-            st.session_state.show_password_form = True
-            st.rerun()
-    else:
-        with st.form("update_password_form"):
-            new_password = st.text_input("Nouveau mot de passe", type="password")
-            new_password2 = st.text_input("Confirme le nouveau mot de passe", type="password")
-            submitted = st.form_submit_button("Changer le mot de passe")
-            if submitted:
-                if new_password != new_password2:
-                    st.warning("Les mots de passe ne correspondent pas.")
-                else:
-                    ok, msg = update_password(new_password)
-                    if ok:
-                        st.success(msg)
-                        st.session_state.show_password_form = False
-                    else:
-                        st.error(msg)
-        if st.button("Annuler"):
-            st.session_state.show_password_form = False
-            st.rerun()
-
-    st.divider()
-    if st.button("🚪 Se déconnecter", use_container_width=True):
-        sign_out()
-        st.rerun()
-
-    st.divider()
-    st.subheader("⚠️ Zone dangereuse")
-
-    if "show_delete_account_form" not in st.session_state:
-        st.session_state.show_delete_account_form = False
-
-    if not st.session_state.show_delete_account_form:
-        if st.button("🗑️ Supprimer mon compte", use_container_width=True):
-            st.session_state.show_delete_account_form = True
-            st.rerun()
-    else:
-        st.error(
-            "Cette action est **définitive et irréversible** : ton profil, tes "
-            "contacts, tes conversations, tes messages et ton historique d'appels "
-            "seront tous supprimés."
-        )
-        confirm_text = st.text_input("Tape SUPPRIMER en majuscules pour confirmer")
-        col_confirm, col_cancel = st.columns(2)
-        if col_confirm.button("Confirmer la suppression définitive", use_container_width=True):
-            if confirm_text == "SUPPRIMER":
-                ok, msg = delete_account(user_id)
-                if ok:
-                    sign_out()
-                    st.success("Ton compte a été supprimé.")
-                    st.rerun()
-                else:
-                    st.error(msg)
-            else:
-                st.warning("Tu dois taper exactement SUPPRIMER pour confirmer.")
-        if col_cancel.button("Annuler", use_container_width=True):
-            st.session_state.show_delete_account_form = False
-            st.rerun()
-
-
-
-
-@st.fragment(run_every=3)
-def build_call_url(active_call: dict, user_id: str, peer_name: str) -> str:
-    """Construit l'URL complète de la page d'appel, avec tout ce qu'il faut
-    pour que cette page puisse à la fois rejoindre LiveKit ET notifier
-    Supabase directement (démarrage/fin d'appel) sans repasser par Streamlit.
-    peer_name = le pseudo de l'AUTRE personne, pour pouvoir l'afficher
-    nommément (ex: 'Marie a quitté l'appel') plutôt qu'un message générique."""
-    call_page_base_url = st.secrets["app"].get("call_page_url", "")
-    token = generate_livekit_token(active_call["room_name"], user_id, peer_name or "Utilisateur")
-    supabase_url = st.secrets["supabase"]["url"]
-    supabase_anon_key = st.secrets["supabase"]["anon_key"]
-    access_token = st.session_state.get("sb_access_token", "")
-    return (
-        f"{call_page_base_url}?url={get_livekit_url()}"
-        f"&token={token}&type={active_call['call_type']}"
-        f"&call_id={active_call['call_id']}"
-        f"&sb_url={supabase_url}&sb_key={supabase_anon_key}&sb_token={access_token}"
-        f"&peer_name={peer_name or 'Ton contact'}"
-    )
-
-
-def trigger_auto_open_call(call_url: str):
-    """Ouvre automatiquement l'appel dans un nouvel onglet, directement au
-    clic sur Accepter/Appeler — sans étape intermédiaire pour l'utilisateur."""
-    components.html(
-        f"""<script>window.open("{call_url}", "_blank");</script>""",
-        height=0,
-    )
-
-
-@st.fragment(run_every=3)
-def render_call_zone_fragment(user_id: str):
-    """Zone unique regroupant TOUT ce qui concerne les appels, dans un seul
-    fragment qui s'actualise tout seul toutes les 3 secondes — bannière
-    d'appel entrant, sonnerie répétée, statut de l'appel en cours, et
-    boutons d'action. Tout vit ICI, à l'intérieur du fragment, plutôt que
-    de tenter de forcer un rechargement de toute la page depuis un minuteur
-    (qui ne se propage pas de façon fiable) : le fragment se redessine tout
-    seul en continu, donc son propre contenu (bannière incluse) apparaît
-    automatiquement sans qu'aucune interaction ne soit nécessaire."""
-
-    active_call = st.session_state.get("active_call")
-
-    if active_call:
-        call_status = get_call_status(active_call["call_id"])
-
-        if call_status == "ringing":
-            st.info("📞 Ça sonne... en attente de réponse.")
-            call_url = build_call_url(active_call, user_id, st.session_state.active_contact_name)
-            st.link_button("🎥 Rejoindre mon appel", call_url, use_container_width=True)
-            timer_key = f"ring_started_at_{active_call['call_id']}"
-            if timer_key not in st.session_state:
-                st.session_state[timer_key] = time.time()
-            elif time.time() - st.session_state[timer_key] > 45:
-                end_call(active_call["call_id"], active_call.get("room_name"))
-                st.session_state.active_call = None
-                st.rerun()
-                return
-            if st.button("❌ Annuler l'appel", key="cancel_call_button", use_container_width=True):
-                end_call(active_call["call_id"], active_call.get("room_name"))
-                st.session_state.active_call = None
-                st.rerun()
-        elif call_status == "declined":
-            st.toast("Appel refusé.")
-            st.session_state.active_call = None
-            st.rerun()
-        elif call_status == "ended":
-            st.toast("Appel terminé.")
-            st.session_state.active_call = None
-            st.rerun()
-        elif call_status == "ongoing":
-            st.success(f"📞 Appel avec {st.session_state.get('active_contact_name', 'Utilisateur')}")
-            call_url = build_call_url(active_call, user_id, st.session_state.active_contact_name)
-            st.link_button("🎥 Rejoindre l'appel", call_url, use_container_width=True)
-
-            if st.button("📵 Terminer l'appel", key="hangup_button", use_container_width=True):
-                end_call(active_call["call_id"], active_call.get("room_name"))
-                st.session_state.active_call = None
-                st.rerun()
-        return
-
-    try:
-        incoming_call = get_incoming_call(user_id)
-    except Exception as e:
-        st.error(f"🔧 Erreur de détection d'appel entrant : {e}")
-        return
-
-    if not incoming_call or incoming_call["id"] == st.session_state.get("declined_call_id"):
-        return
-
-    caller_profile = incoming_call.get("profiles") or {}
-    caller_name = caller_profile.get("username", "Quelqu'un")
-    call_icon = "🎥" if incoming_call["call_type"] == "video" else "📞"
-    st.warning(f"{call_icon} Appel entrant de **{caller_name}**")
-    components.html(BEEP_SCRIPT + f"<!-- {time.time()} -->", height=0)
-
-    col_accept, col_decline = st.columns(2)
-    if col_accept.button("✅ Accepter", key=f"accept_call_{incoming_call['id']}", use_container_width=True):
-        accept_call(incoming_call["id"])
-        st.session_state.active_call = {
-            "call_id": incoming_call["id"],
-            "room_name": incoming_call["room_name"],
-            "call_type": incoming_call["call_type"],
+    window.onerror = function (message, source, lineno, colno, error) {
+        log("❌ ERREUR JS: " + message + " (ligne " + lineno + ")");
+    };
+
+    const params = new URLSearchParams(window.location.search);
+    const livekitUrl = params.get('url');
+    const token = params.get('token');
+    const showVideo = params.get('type') === 'video';
+    const callId = params.get('call_id');
+    const sbUrl = params.get('sb_url');
+    const sbKey = params.get('sb_key');
+    const sbToken = params.get('sb_token');
+    const peerName = params.get('peer_name') || "L'autre personne";
+
+    let callAlreadyEnded = false;
+    async function notifyCallEnded() {
+        if (callAlreadyEnded || !callId || !sbUrl || !sbKey || !sbToken) {
+            log("⚠️ Notification impossible : paramètre manquant (callId=" + callId + ", sbUrl=" + (sbUrl ? "ok" : "manquant") + ", sbKey=" + (sbKey ? "ok" : "manquant") + ", sbToken=" + (sbToken ? "ok" : "manquant") + ")");
+            return;
         }
-        st.session_state.active_conversation = incoming_call["conversation_id"]
-        st.session_state.active_contact_name = caller_name
-        st.session_state.active_contact_id = incoming_call["caller_id"]
-        call_url = build_call_url(st.session_state.active_call, user_id, caller_name)
-        trigger_auto_open_call(call_url)
-        st.rerun()
-    if col_decline.button("❌ Refuser", key=f"decline_call_{incoming_call['id']}", use_container_width=True):
-        decline_call(incoming_call["id"])
-        st.session_state.declined_call_id = incoming_call["id"]
-        st.rerun()
+        callAlreadyEnded = true;
+        try {
+            const resp = await fetch(`${sbUrl}/rest/v1/calls?id=eq.${callId}`, {
+                method: 'PATCH',
+                headers: {
+                    'apikey': sbKey,
+                    'Authorization': `Bearer ${sbToken}`,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=minimal',
+                },
+                body: JSON.stringify({ status: 'ended', ended_at: new Date().toISOString() }),
+            });
+            if (resp.ok) {
+                console.log("📤 Statut 'terminé' confirmé par le serveur (code " + resp.status + ").");
+            } else {
+                const errText = await resp.text();
+                log("❌ Le serveur a REJETÉ la mise à jour (code " + resp.status + "): " + errText);
+            }
+        } catch (e) {
+            log("⚠️ Impossible de notifier l'app principale : " + e.message);
+        }
+    }
 
+    let callAlreadyMarkedOngoing = false;
+    async function notifyCallOngoing() {
+        if (callAlreadyMarkedOngoing || !callId || !sbUrl || !sbKey || !sbToken) return;
+        callAlreadyMarkedOngoing = true;
+        try {
+            await fetch(`${sbUrl}/rest/v1/calls?id=eq.${callId}`, {
+                method: 'PATCH',
+                headers: {
+                    'apikey': sbKey,
+                    'Authorization': `Bearer ${sbToken}`,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=minimal',
+                },
+                body: JSON.stringify({ status: 'ongoing' }),
+            });
+            console.log("📤 Statut 'en cours' confirmé par le serveur.");
+        } catch (e) {
+            log("⚠️ Impossible de notifier le démarrage : " + e.message);
+        }
+    }
 
-def show_app():
-    user = st.session_state.user
-    touch_last_seen(user.id)  # heartbeat : marque l'utilisateur comme actif
+    // Surveille le statut de l'appel côté app principale : si l'autre
+    // personne refuse ou raccroche depuis l'app (avant même d'avoir
+    // rejoint cette page), on se déconnecte proprement au lieu de rester
+    // bloqué en "attente" indéfiniment.
+    let statusCheckInterval = null;
+    if (callId && sbUrl && sbKey && sbToken) {
+        statusCheckInterval = setInterval(async () => {
+            try {
+                const resp = await fetch(`${sbUrl}/rest/v1/calls?id=eq.${callId}&select=status`, {
+                    headers: { 'apikey': sbKey, 'Authorization': `Bearer ${sbToken}` },
+                });
+                const rows = await resp.json();
+                const remoteStatus = rows && rows[0] ? rows[0].status : null;
+                if (remoteStatus === 'declined' || remoteStatus === 'ended') {
+                    console.log("📥 Statut distant détecté : " + remoteStatus + ". Déconnexion...");
+                    clearInterval(statusCheckInterval);
+                    try {
+                        await room.localParticipant.setCameraEnabled(false);
+                        await room.localParticipant.setMicrophoneEnabled(false);
+                    } catch (e) {}
+                    room.disconnect();
+                    statusEl.innerText = remoteStatus === 'declined'
+                        ? peerName + " a refusé l'appel."
+                        : "Appel avec " + peerName + " terminé. Tu peux fermer cet onglet.";
+                    callAlreadyEnded = true;
+                }
+            } catch (e) {
+                // Erreur réseau ponctuelle, sans gravité : on réessaiera au prochain cycle.
+            }
+        }, 3000);
+    }
 
-    render_header(f"Connecté en tant que {user.email}")
+    log("Démarrage. showVideo=" + showVideo);
+    log("URL LiveKit: " + (livekitUrl ? livekitUrl : "MANQUANTE"));
+    log("Token présent: " + (token ? "oui (" + token.length + " caractères)" : "MANQUANT"));
 
-    render_call_zone_fragment(user.id)
+    const LK = LivekitClient;
+    log("Version livekit-client chargée: " + (LK.version || "inconnue"));
+    const room = new LK.Room();
 
-    tab_chat, tab_contacts, tab_profile = st.tabs(["💬 Chat", "👥 Contacts", "⚙️ Profil"])
-    with tab_chat:
-        show_chat_tab(user.id)
-    with tab_contacts:
-        show_contacts_tab(user.id)
-    with tab_profile:
-        show_profile_tab(user.id)
+    const statusEl = document.getElementById('bnb-status');
+    const remoteVideoEl = document.getElementById('bnb-remote-video');
+    const remoteAudioEl = document.getElementById('bnb-remote-audio');
+    const localVideoEl = document.getElementById('bnb-local-video');
+    const localWrapper = document.getElementById('bnb-local-wrapper');
 
-    render_footer()
+    if (!showVideo) {
+        localWrapper.style.display = 'none';
+        document.getElementById('bnb-toggle-cam').style.display = 'none';
+    }
 
+    if (!livekitUrl || !token) {
+        statusEl.innerText = "❌ Lien d'appel invalide (paramètres manquants).";
+        log("ARRÊT : paramètres manquants.");
+        return;
+    }
 
-if st.session_state.user is None:
-    show_auth_screen()
-else:
-    show_app()
+    // Écoute de TOUS les événements pertinents de la room, avant même
+    // de se connecter, pour ne rien manquer.
+    room.on(LK.RoomEvent.ConnectionStateChanged, (state) => {
+        log("État de connexion: " + state);
+    });
+    room.on(LK.RoomEvent.ParticipantConnected, (p) => {
+        log("👤 Participant connecté: " + p.identity);
+        statusEl.innerText = "Connecté avec " + peerName + "...";
+        notifyCallOngoing();
+    });
+    room.on(LK.RoomEvent.ParticipantDisconnected, (p) => {
+        log("👤 Participant déconnecté: " + (p ? p.identity : "?"));
+        statusEl.innerText = peerName + " a quitté l'appel.";
+    });
+    room.on(LK.RoomEvent.TrackPublished, (publication, participant) => {
+        log("📡 Track PUBLIÉE par " + participant.identity + " (" + publication.kind + ")");
+    });
+    room.on(LK.RoomEvent.TrackSubscribed, (track, publication, participant) => {
+        log("✅ Track REÇUE de " + participant.identity + " (" + track.kind + ")");
+        statusEl.innerText = "En cours d'appel";
+        notifyCallOngoing();
+        if (track.kind === 'video') {
+            track.attach(remoteVideoEl);
+        } else if (track.kind === 'audio') {
+            track.attach(remoteAudioEl);
+        }
+    });
+    room.on(LK.RoomEvent.TrackSubscriptionFailed, (trackSid, participant) => {
+        log("❌ ÉCHEC subscription track " + trackSid + " de " + participant.identity);
+    });
+    room.on(LK.RoomEvent.TrackUnpublished, (publication, participant) => {
+        log("📡 Track dépubliée par " + participant.identity);
+    });
+    room.on(LK.RoomEvent.LocalTrackPublished, (publication) => {
+        log("📤 MA track publiée: " + publication.kind);
+    });
+    room.on(LK.RoomEvent.MediaDevicesError, (e) => {
+        log("⚠️ Erreur périphérique média: " + e.message);
+    });
+    room.on(LK.RoomEvent.Disconnected, async (reason) => {
+        log("Déconnecté. Raison: " + reason);
+        try {
+            await room.localParticipant.setCameraEnabled(false);
+            await room.localParticipant.setMicrophoneEnabled(false);
+        } catch (e) {}
+        statusEl.innerText = "Appel avec " + peerName + " terminé. Tu peux fermer cet onglet.";
+        notifyCallEnded();
+    });
+    room.on(LK.RoomEvent.Reconnecting, () => {
+        log("🔄 Reconnexion en cours...");
+    });
+    room.on(LK.RoomEvent.Reconnected, () => {
+        log("✅ Reconnecté.");
+    });
+
+    try {
+        log("Tentative de connexion à la room...");
+        await room.connect(livekitUrl, token);
+        log("✅ Connecté à la room. SID room: " + room.name);
+        log("Nombre de participants déjà présents: " + room.numParticipants);
+        statusEl.innerText = "Connecté. Activation du micro...";
+
+        try {
+            await room.localParticipant.setMicrophoneEnabled(true);
+            log("✅ Micro activé et publié.");
+            statusEl.innerText = "En attente de l'autre participant...";
+        } catch (micErr) {
+            log("❌ ERREUR micro: " + micErr.message);
+            statusEl.innerText = "⚠️ Micro refusé : " + micErr.message;
+        }
+
+        if (showVideo) {
+            try {
+                await room.localParticipant.setCameraEnabled(true);
+                log("✅ Caméra activée et publiée.");
+                const camPub = room.localParticipant.getTrackPublication(LK.Track.Source.Camera);
+                if (camPub && camPub.track) {
+                    camPub.track.attach(localVideoEl);
+                }
+            } catch (camErr) {
+                log("❌ ERREUR caméra: " + camErr.message);
+                statusEl.innerText = "⚠️ Caméra refusée : " + camErr.message;
+            }
+        }
+
+        // Vérifie s'il y avait déjà des participants/tracks au moment
+        // de notre connexion (utile si l'autre est arrivé avant nous).
+        if (room.remoteParticipants.size > 0) {
+            statusEl.innerText = "Connecté avec " + peerName + "...";
+            notifyCallOngoing();
+        }
+        room.remoteParticipants.forEach((participant) => {
+            log("👤 Déjà présent: " + participant.identity);
+            participant.trackPublications.forEach((pub) => {
+                log("   -> track existante: " + pub.kind + " (souscrite: " + pub.isSubscribed + ")");
+            });
+        });
+
+    } catch (err) {
+        log("❌ ERREUR de connexion à la room: " + err.message);
+        statusEl.innerText = "❌ Erreur de connexion : " + err.message;
+    }
+
+    let micOn = true;
+    document.getElementById('bnb-toggle-mic').onclick = async function () {
+        micOn = !micOn;
+        await room.localParticipant.setMicrophoneEnabled(micOn);
+        this.style.opacity = micOn ? "1" : "0.5";
+        log("Micro " + (micOn ? "réactivé" : "coupé") + " manuellement.");
+    };
+
+    let camOn = true;
+    document.getElementById('bnb-toggle-cam').onclick = async function () {
+        camOn = !camOn;
+        await room.localParticipant.setCameraEnabled(camOn);
+        this.style.opacity = camOn ? "1" : "0.5";
+        log("Caméra " + (camOn ? "réactivée" : "coupée") + " manuellement.");
+    };
+
+    document.getElementById('bnb-hangup').onclick = async function () {
+        log("Raccroché manuellement.");
+        if (statusCheckInterval) clearInterval(statusCheckInterval);
+        try {
+            await room.localParticipant.setCameraEnabled(false);
+            await room.localParticipant.setMicrophoneEnabled(false);
+        } catch (e) {
+            log("⚠️ Erreur en coupant caméra/micro : " + e.message);
+        }
+        room.disconnect();
+        statusEl.innerText = "Appel avec " + peerName + " terminé. Tu peux fermer cet onglet.";
+        notifyCallEnded();
+    };
+
+    // Caméra locale déplaçable (souris + tactile)
+    let dragging = false;
+    let offsetX = 0, offsetY = 0;
+
+    function startDrag(x, y) {
+        dragging = true;
+        const rect = localWrapper.getBoundingClientRect();
+        offsetX = x - rect.left;
+        offsetY = y - rect.top;
+        localWrapper.style.cursor = 'grabbing';
+    }
+
+    function doDrag(x, y) {
+        if (!dragging) return;
+        const rootRect = document.getElementById('bnb-call-root').getBoundingClientRect();
+        let newLeft = x - rootRect.left - offsetX;
+        let newTop = y - rootRect.top - offsetY;
+        newLeft = Math.max(0, Math.min(newLeft, rootRect.width - localWrapper.offsetWidth));
+        newTop = Math.max(0, Math.min(newTop, rootRect.height - localWrapper.offsetHeight));
+        localWrapper.style.left = newLeft + 'px';
+        localWrapper.style.top = newTop + 'px';
+        localWrapper.style.right = 'auto';
+    }
+
+    function endDrag() {
+        dragging = false;
+        localWrapper.style.cursor = 'grab';
+    }
+
+    localWrapper.addEventListener('mousedown', (e) => startDrag(e.clientX, e.clientY));
+    document.addEventListener('mousemove', (e) => doDrag(e.clientX, e.clientY));
+    document.addEventListener('mouseup', endDrag);
+
+    localWrapper.addEventListener('touchstart', (e) => {
+        const t = e.touches[0];
+        startDrag(t.clientX, t.clientY);
+    }, {passive: true});
+    document.addEventListener('touchmove', (e) => {
+        const t = e.touches[0];
+        doDrag(t.clientX, t.clientY);
+    }, {passive: true});
+    document.addEventListener('touchend', endDrag);
+})();
+</script>
+
+</body>
+</html>
