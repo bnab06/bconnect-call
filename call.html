@@ -291,7 +291,7 @@
     });
     room.on(LK.RoomEvent.TrackSubscribed, (track, publication, participant) => {
         log("✅ Track REÇUE de " + participant.identity + " (" + track.kind + ")");
-        statusEl.innerText = "En cours d'appel";
+        statusEl.innerText = "En cours d'appel avec " + peerName;
         notifyCallOngoing();
         if (track.kind === 'video') {
             track.attach(remoteVideoEl);
