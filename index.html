@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<title>BnB Connect</title>
+
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+<link rel="icon" href="icons/favicon-32.png" />
+<meta name="theme-color" content="#6C5CE7" />
+
+<!-- Nécessaire pour que l'ajout à l'écran d'accueil iOS s'ouvre en plein
+     écran (mode standalone), sans quoi Safari s'ouvre en mode navigateur
+     normal même une fois l'icône ajoutée. -->
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="BnB Connect" />
+
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #6C5CE7;
+  }
+  #app-frame {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border: none;
+  }
+  #push-banner {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: env(safe-area-inset-bottom, 12px);
+    background: linear-gradient(135deg, #6C5CE7, #A29BFE);
+    color: white;
+    padding: 14px 16px;
+    border-radius: 14px;
+    font-family: -apple-system, sans-serif;
+    font-size: 14px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+    z-index: 9999;
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  #push-banner button {
+    background: white;
+    color: #6C5CE7;
+    border: none;
+    border-radius: 10px;
+    padding: 8px 14px;
+    font-weight: 700;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+  #push-banner .dismiss {
+    background: transparent;
+    color: white;
+    font-size: 18px;
+    padding: 0 6px;
+    font-weight: 400;
+  }
+</style>
+</head>
+<body>
+
+<iframe id="app-frame" src="https://bconnect-gc85p96w6l29zihyx5zs4e.streamlit.app/?embed=true"
+        allow="camera; microphone; autoplay"></iframe>
+
+<div id="push-banner">
+  <span>🔔 Active les notifications pour ne manquer aucun appel</span>
+  <div style="display:flex; align-items:center; gap:6px;">
+    <button id="push-enable-btn">Activer</button>
+    <button class="dismiss" id="push-dismiss-btn">✕</button>
+  </div>
+</div>
+
+<script>
+// ⚠️ À remplacer par tes vraies valeurs Supabase (visibles dans
+// Project Settings > API — l'URL du projet et la clé "anon public",
+// qui est déjà utilisée publiquement ailleurs dans l'app, ex: call.html).
+const SUPABASE_URL = "https://qswsccuuyxunymzwngyv.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFzd3NjY3V1eXh1bnltenduZ3l2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgxNDQzNDUsImV4cCI6MjEwMzcyMDM0NX0.slbvmhh89XgRy2lpAoYKS4QbsLQsBRmuw0ccw92FkeE";
+
+// Clé publique VAPID (générée une fois, ne change jamais). La clé privée
+// correspondante reste uniquement côté serveur Python (secrets Streamlit).
+const VAPID_PUBLIC_KEY = "BNM006T0IWmNdS2vhFN10zIbHAcCjZO6L6z379CmlWcTsW3TBlAudghEp-v2Xyhb2colveywVjePLro6rcaAuco";
+
+const STREAMLIT_APP_ORIGIN = "https://bconnect-gc85p96w6l29zihyx5zs4e.streamlit.app";
+
+let currentUserId = localStorage.getItem("bnb_current_user_id") || null;
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i++) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+async function saveSubscriptionToSupabase(subscription, userId) {
+  const raw = subscription.toJSON();
+  const body = {
+    user_id: userId,
+    endpoint: raw.endpoint,
+    p256dh: raw.keys.p256dh,
+    auth: raw.keys.auth,
+  };
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/push_subscriptions?on_conflict=endpoint`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+        "Prefer": "resolution=merge-duplicates",
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    console.error("bnb: échec de l'enregistrement de l'abonnement push", e);
+  }
+}
+
+async function enablePushNotifications() {
+  try {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+      alert("Les notifications ne sont pas supportées sur ce navigateur.");
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") return;
+
+    const registration = await navigator.serviceWorker.ready;
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
+    }
+    if (currentUserId) {
+      await saveSubscriptionToSupabase(subscription, currentUserId);
+      localStorage.setItem("bnb_push_enabled", "1");
+    }
+    document.getElementById("push-banner").style.display = "none";
+  } catch (e) {
+    console.error("bnb: échec de l'activation des notifications", e);
+  }
+}
+
+function maybeShowPushBanner() {
+  if (!("Notification" in window)) return;
+  if (Notification.permission === "granted" && localStorage.getItem("bnb_push_enabled") === "1") return;
+  if (Notification.permission === "denied") return;
+  if (!currentUserId) return;
+  document.getElementById("push-banner").style.display = "flex";
+}
+
+document.getElementById("push-enable-btn").addEventListener("click", enablePushNotifications);
+document.getElementById("push-dismiss-btn").addEventListener("click", function () {
+  document.getElementById("push-banner").style.display = "none";
+});
+
+// L'app Streamlit (à l'intérieur de l'iframe) annonce l'identifiant de
+// l'utilisateur connecté via postMessage, dès qu'il est connecté.
+window.addEventListener("message", function (event) {
+  if (event.origin !== STREAMLIT_APP_ORIGIN) return;
+  if (event.data && event.data.type === "bnb_logged_in" && event.data.user_id) {
+    currentUserId = event.data.user_id;
+    localStorage.setItem("bnb_current_user_id", currentUserId);
+    maybeShowPushBanner();
+  }
+});
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("service-worker.js").catch(function (e) {
+    console.error("bnb: échec de l'enregistrement du service worker", e);
+  });
+}
+</script>
+
+</body>
+</html>
