@@ -163,6 +163,20 @@ async function saveSubscriptionToSupabase(subscription, userId) {
   }
 }
 
+function waitForUserId(timeoutMs) {
+  // Attend que currentUserId soit connu (reçu depuis l'app via
+  // postMessage), sans dépasser timeoutMs — au cas où l'utilisateur tape
+  // "Activer" avant que le message ait eu le temps d'arriver.
+  return new Promise(function (resolve) {
+    const start = Date.now();
+    (function check() {
+      if (currentUserId) return resolve(currentUserId);
+      if (Date.now() - start > timeoutMs) return resolve(null);
+      setTimeout(check, 250);
+    })();
+  });
+}
+
 async function enablePushNotifications() {
   try {
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
@@ -180,11 +194,15 @@ async function enablePushNotifications() {
         applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
       });
     }
-    if (currentUserId) {
-      await saveSubscriptionToSupabase(subscription, currentUserId);
+
+    const userId = await waitForUserId(5000);
+    if (userId) {
+      await saveSubscriptionToSupabase(subscription, userId);
       localStorage.setItem("bnb_push_enabled", "1");
+      document.getElementById("push-banner").style.display = "none";
+    } else {
+      alert("Connecte-toi d'abord dans l'app, puis réessaie d'activer les notifications.");
     }
-    document.getElementById("push-banner").style.display = "none";
   } catch (e) {
     console.error("bnb: échec de l'activation des notifications", e);
   }
@@ -194,9 +212,15 @@ function maybeShowPushBanner() {
   if (!("Notification" in window)) return;
   if (Notification.permission === "granted" && localStorage.getItem("bnb_push_enabled") === "1") return;
   if (Notification.permission === "denied") return;
-  if (!currentUserId) return;
   document.getElementById("push-banner").style.display = "flex";
 }
+
+// On affiche la bannière après un court délai, qu'on ait déjà reçu ou non
+// l'identifiant de l'utilisateur via postMessage (voir enablePushNotifications
+// et waitForUserId, qui gèrent le cas où il n'est pas encore arrivé) — pour
+// ne jamais dépendre d'un timing parfait entre le chargement de la coquille
+// et celui de l'app Streamlit à l'intérieur.
+setTimeout(maybeShowPushBanner, 2500);
 
 document.getElementById("push-enable-btn").addEventListener("click", enablePushNotifications);
 document.getElementById("push-dismiss-btn").addEventListener("click", function () {
