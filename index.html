@@ -81,7 +81,7 @@
   #switch-view-btn {
     position: fixed;
     right: 14px;
-    bottom: env(safe-area-inset-bottom, 14px);
+    top: calc(env(safe-area-inset-top, 14px) + 10px);
     background: #6C5CE7;
     color: white;
     border: none;
@@ -274,6 +274,18 @@ window.addEventListener("message", function (event) {
     callFrame.src = event.data.url;
     switchBtn.style.display = "block";
     showCallView();
+  }
+});
+
+// call.html (chargé dans #call-frame, même origine que cette page) signale
+// la fin de l'appel — qu'il ait été raccroché ici, refusé, ou terminé par
+// l'autre personne. On revient alors automatiquement au chat et on masque
+// le bouton de bascule, qui n'aurait plus aucun appel à afficher.
+window.addEventListener("message", function (event) {
+  if (event.data && event.data.type === "bnb_call_ended") {
+    showChatView();
+    switchBtn.style.display = "none";
+    callFrame.src = "";
   }
 });
 
