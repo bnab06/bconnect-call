@@ -81,7 +81,9 @@
   #switch-view-btn {
     position: fixed;
     right: 14px;
-    top: calc(env(safe-area-inset-top, 14px) + 10px);
+    /* Sous la vignette caméra locale de call.html (24px + 130px de haut),
+       pour ne jamais la recouvrir ni les contrôles du bas. */
+    top: calc(env(safe-area-inset-top, 0px) + 168px);
     background: #6C5CE7;
     color: white;
     border: none;
@@ -250,13 +252,93 @@ function showChatView() {
   showingCall = false;
 }
 
-switchBtn.addEventListener("click", function () {
+function toggleCallChatView() {
   if (showingCall) {
     showChatView();
   } else {
     showCallView();
   }
-});
+}
+
+// Bouton déplaçable au doigt (comme la vignette caméra locale dans
+// call.html), avec une petite tolérance de mouvement pour distinguer un
+// simple tap (bascule chat/appel) d'un vrai glissé (repositionnement).
+(function makeSwitchButtonDraggable(el) {
+  let dragging = false;
+  let moved = false;
+  let offsetX = 0, offsetY = 0;
+  let startX = 0, startY = 0;
+  let suppressNextClick = false;
+
+  function start(x, y) {
+    dragging = true;
+    moved = false;
+    startX = x;
+    startY = y;
+    const rect = el.getBoundingClientRect();
+    offsetX = x - rect.left;
+    offsetY = y - rect.top;
+  }
+
+  function move(x, y) {
+    if (!dragging) return;
+    if (Math.abs(x - startX) > 6 || Math.abs(y - startY) > 6) moved = true;
+    if (!moved) return;
+    const maxLeft = window.innerWidth - el.offsetWidth - 4;
+    const maxTop = window.innerHeight - el.offsetHeight - 4;
+    const newLeft = Math.max(4, Math.min(x - offsetX, maxLeft));
+    const newTop = Math.max(4, Math.min(y - offsetY, maxTop));
+    el.style.left = newLeft + "px";
+    el.style.top = newTop + "px";
+    el.style.right = "auto";
+  }
+
+  function end() {
+    if (!dragging) return;
+    dragging = false;
+    if (moved) {
+      suppressNextClick = true;
+      try {
+        localStorage.setItem(
+          "bnb_switch_btn_pos",
+          JSON.stringify({ left: el.style.left, top: el.style.top })
+        );
+      } catch (e) {}
+    }
+  }
+
+  el.addEventListener("mousedown", (e) => start(e.clientX, e.clientY));
+  document.addEventListener("mousemove", (e) => move(e.clientX, e.clientY));
+  document.addEventListener("mouseup", end);
+
+  el.addEventListener("touchstart", (e) => { const t = e.touches[0]; start(t.clientX, t.clientY); }, { passive: true });
+  document.addEventListener("touchmove", (e) => { const t = e.touches[0]; move(t.clientX, t.clientY); }, { passive: true });
+  document.addEventListener("touchend", end);
+
+  el.addEventListener(
+    "click",
+    function (e) {
+      if (suppressNextClick) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        suppressNextClick = false;
+        return;
+      }
+      toggleCallChatView();
+    },
+    true
+  );
+
+  // Restaure la position laissée la dernière fois, si elle existe.
+  try {
+    const saved = JSON.parse(localStorage.getItem("bnb_switch_btn_pos") || "null");
+    if (saved && saved.left && saved.top) {
+      el.style.left = saved.left;
+      el.style.top = saved.top;
+      el.style.right = "auto";
+    }
+  } catch (e) {}
+})(switchBtn);
 
 // L'app Streamlit (à l'intérieur de l'iframe) annonce l'identifiant de
 // l'utilisateur connecté, et demande l'ouverture d'un appel, via
