@@ -68,12 +68,42 @@
     padding: 0 6px;
     font-weight: 400;
   }
+  #call-frame {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: none;
+    z-index: 500;
+  }
+  #switch-view-btn {
+    position: fixed;
+    right: 14px;
+    bottom: env(safe-area-inset-bottom, 14px);
+    background: #6C5CE7;
+    color: white;
+    border: none;
+    border-radius: 24px;
+    padding: 12px 18px;
+    font-family: -apple-system, sans-serif;
+    font-weight: 700;
+    font-size: 14px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+    z-index: 9998;
+    display: none;
+  }
 </style>
 </head>
 <body>
 
 <iframe id="app-frame" src="https://bconnect-gc85p96w6l29zihyx5zs4e.streamlit.app/?embed=true"
         allow="camera; microphone; autoplay"></iframe>
+
+<iframe id="call-frame" allow="camera; microphone; autoplay"></iframe>
+
+<button id="switch-view-btn">📞 Voir l'appel</button>
 
 <div id="push-banner">
   <span>🔔 Active les notifications pour ne manquer aucun appel</span>
@@ -87,8 +117,8 @@
 // ⚠️ À remplacer par tes vraies valeurs Supabase (visibles dans
 // Project Settings > API — l'URL du projet et la clé "anon public",
 // qui est déjà utilisée publiquement ailleurs dans l'app, ex: call.html).
-const SUPABASE_URL = "https://qswsccuuyxunymzwngyv.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFzd3NjY3V1eXh1bnltenduZ3l2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgxNDQzNDUsImV4cCI6MjEwMzcyMDM0NX0.slbvmhh89XgRy2lpAoYKS4QbsLQsBRmuw0ccw92FkeE";
+const SUPABASE_URL = "SUPABASE_URL_ICI";
+const SUPABASE_ANON_KEY = "SUPABASE_ANON_KEY_ICI";
 
 // Clé publique VAPID (générée une fois, ne change jamais). La clé privée
 // correspondante reste uniquement côté serveur Python (secrets Streamlit).
@@ -173,14 +203,53 @@ document.getElementById("push-dismiss-btn").addEventListener("click", function (
   document.getElementById("push-banner").style.display = "none";
 });
 
+// --- Bascule entre le chat et l'appel ------------------------------
+// En mode "standalone" (app installée sur l'écran d'accueil), il n'y a
+// pas de vrais onglets de navigateur : un "nouvel onglet" prendrait toute
+// la place sans retour possible. On garde donc l'appel dans un second
+// cadre à l'intérieur de cette même page, avec un bouton pour basculer
+// manuellement entre les deux — les deux restent actifs en parallèle.
+const appFrame = document.getElementById("app-frame");
+const callFrame = document.getElementById("call-frame");
+const switchBtn = document.getElementById("switch-view-btn");
+let showingCall = false;
+
+function showCallView() {
+  callFrame.style.display = "block";
+  switchBtn.textContent = "💬 Revenir au chat";
+  showingCall = true;
+}
+
+function showChatView() {
+  callFrame.style.display = "none";
+  switchBtn.textContent = "📞 Voir l'appel";
+  showingCall = false;
+}
+
+switchBtn.addEventListener("click", function () {
+  if (showingCall) {
+    showChatView();
+  } else {
+    showCallView();
+  }
+});
+
 // L'app Streamlit (à l'intérieur de l'iframe) annonce l'identifiant de
-// l'utilisateur connecté via postMessage, dès qu'il est connecté.
+// l'utilisateur connecté, et demande l'ouverture d'un appel, via
+// postMessage.
 window.addEventListener("message", function (event) {
   if (event.origin !== STREAMLIT_APP_ORIGIN) return;
+
   if (event.data && event.data.type === "bnb_logged_in" && event.data.user_id) {
     currentUserId = event.data.user_id;
     localStorage.setItem("bnb_current_user_id", currentUserId);
     maybeShowPushBanner();
+  }
+
+  if (event.data && event.data.type === "bnb_open_call" && event.data.url) {
+    callFrame.src = event.data.url;
+    switchBtn.style.display = "block";
+    showCallView();
   }
 });
 
