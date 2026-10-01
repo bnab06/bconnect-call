@@ -54,17 +54,6 @@
     font-size: 13px;
     max-width: 55%;
   }
-  #bnb-tab-hint {
-    position: absolute;
-    bottom: 78px;
-    left: 24px;
-    color: white;
-    background: rgba(108,92,231,0.85);
-    padding: 4px 10px;
-    border-radius: 10px;
-    font-size: 10px;
-    max-width: 60%;
-  }
   #bnb-controls {
     position: absolute;
     bottom: 16px;
@@ -100,8 +89,6 @@
 
   <div id="bnb-status">Connexion...</div>
 
-  <div id="bnb-tab-hint">💡 Change d'onglet sans fermer l'appel</div>
-
   <div id="bnb-controls">
     <button class="bnb-btn" id="bnb-toggle-mic">🎤</button>
     <button class="bnb-btn" id="bnb-toggle-cam">📷</button>
@@ -129,13 +116,26 @@
     const sbToken = params.get('sb_token');
     const peerName = params.get('peer_name') || "L'autre personne";
 
+    // Signale à la page parente (la coquille bconnect-call, si cette page
+    // est affichée dans son second cadre d'appel) que l'appel est terminé,
+    // pour qu'elle masque automatiquement le bouton de bascule. Sans effet
+    // si cette page est ouverte seule dans un onglet classique (il n'y a
+    // alors personne pour écouter ce message).
+    function notifyParentCallEnded() {
+        try {
+            window.parent.postMessage({ type: "bnb_call_ended" }, "*");
+        } catch (e) {}
+    }
+
     let callAlreadyEnded = false;
     async function notifyCallEnded() {
         if (callAlreadyEnded || !callId || !sbUrl || !sbKey || !sbToken) {
             log("⚠️ Notification impossible : paramètre manquant (callId=" + callId + ", sbUrl=" + (sbUrl ? "ok" : "manquant") + ", sbKey=" + (sbKey ? "ok" : "manquant") + ", sbToken=" + (sbToken ? "ok" : "manquant") + ")");
+            notifyParentCallEnded();
             return;
         }
         callAlreadyEnded = true;
+        notifyParentCallEnded();
         try {
             const resp = await fetch(`${sbUrl}/rest/v1/calls?id=eq.${callId}`, {
                 method: 'PATCH',
@@ -204,6 +204,7 @@
                         ? peerName + " a refusé l'appel."
                         : "Appel avec " + peerName + " terminé. Tu peux fermer cet onglet.";
                     callAlreadyEnded = true;
+                    notifyParentCallEnded();
                 }
             } catch (e) {
                 // Erreur réseau ponctuelle, sans gravité : on réessaiera au prochain cycle.
