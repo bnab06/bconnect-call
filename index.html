@@ -100,8 +100,19 @@
 </head>
 <body>
 
-<iframe id="app-frame" src="https://bconnect-gc85p96w6l29zihyx5zs4e.streamlit.app/?embed=true"
-        allow="camera; microphone; autoplay"></iframe>
+<iframe id="app-frame" allow="camera; microphone; autoplay"></iframe>
+<script>
+// Chargement de l'app Streamlit. Si un jeton "Rester connecté" est gardé
+// par cette page (stockage de premier niveau, fiable), on l'ajoute à l'URL
+// (?rt=...) : l'app s'en sert pour rouvrir la session sans nouvelle saisie.
+(function () {
+  var url = "https://bconnect-gc85p96w6l29zihyx5zs4e.streamlit.app/?embed=true";
+  var token = null;
+  try { token = localStorage.getItem("bnb_refresh_token"); } catch (e) {}
+  if (token) { url += "&rt=" + encodeURIComponent(token); }
+  document.getElementById("app-frame").src = url;
+})();
+</script>
 
 <iframe id="call-frame" allow="camera; microphone; autoplay"></iframe>
 
@@ -321,6 +332,24 @@ function showChatView() {
   showingCall = false;
 }
 
+function ensureSwitchButtonVisible() {
+  // Si la position enregistrée du bouton le place hors de l'écran (autre
+  // taille d'écran, rotation...), on le remet à sa place par défaut.
+  try {
+    if (getComputedStyle(switchBtn).display === "none") return;
+    const r = switchBtn.getBoundingClientRect();
+    const outside = r.left < 0 || r.top < 0 ||
+                    r.right > window.innerWidth || r.bottom > window.innerHeight;
+    if (outside) {
+      switchBtn.style.left = "";
+      switchBtn.style.top = "";
+      switchBtn.style.right = "";
+      try { localStorage.removeItem("bnb_switch_btn_pos"); } catch (e) {}
+    }
+  } catch (e) {}
+}
+window.addEventListener("resize", ensureSwitchButtonVisible);
+
 function toggleCallChatView() {
   if (showingCall) {
     showChatView();
@@ -415,6 +444,30 @@ function toggleCallChatView() {
 window.addEventListener("message", function (event) {
   if (event.origin !== STREAMLIT_APP_ORIGIN) return;
 
+  // --- Jeton "Rester connecté" : gardé ici, dans le stockage de cette page ---
+  if (event.data && event.data.type === "bnb_save_refresh_token" && event.data.refresh_token) {
+    try { localStorage.setItem("bnb_refresh_token", event.data.refresh_token); } catch (e) {}
+  }
+
+  if (event.data && event.data.type === "bnb_clear_refresh_token") {
+    // Déconnexion (ou jeton devenu invalide) : on oublie aussi la session
+    // en mémoire et l'identifiant, pour ne jamais abonner aux notifications
+    // un appareil au nom d'un utilisateur déconnecté.
+    try { localStorage.removeItem("bnb_refresh_token"); } catch (e) {}
+    try { localStorage.removeItem("bnb_current_user_id"); } catch (e) {}
+    currentUserId = null;
+    currentAccessToken = null;
+  }
+
+  if (event.data && event.data.type === "bnb_request_refresh_token") {
+    // L'app (session recréée sans rechargement de page) redemande le jeton.
+    var savedToken = null;
+    try { savedToken = localStorage.getItem("bnb_refresh_token"); } catch (e) {}
+    if (savedToken && event.source) {
+      event.source.postMessage({ type: "bnb_refresh_token", refresh_token: savedToken }, event.origin);
+    }
+  }
+
   if (event.data && event.data.type === "bnb_logged_in" && event.data.user_id) {
     currentUserId = event.data.user_id;
     localStorage.setItem("bnb_current_user_id", currentUserId);
@@ -428,6 +481,7 @@ window.addEventListener("message", function (event) {
     callFrame.src = event.data.url;
     switchBtn.style.display = "block";
     showCallView();
+    ensureSwitchButtonVisible();
   }
 });
 
