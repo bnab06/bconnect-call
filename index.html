@@ -129,6 +129,9 @@ const VAPID_PUBLIC_KEY = "BNM006T0IWmNdS2vhFN10zIbHAcCjZO6L6z379CmlWcTsW3TBlAudg
 const STREAMLIT_APP_ORIGIN = "https://bconnect-gc85p96w6l29zihyx5zs4e.streamlit.app";
 
 let currentUserId = localStorage.getItem("bnb_current_user_id") || null;
+// Jeton de session Supabase de l'utilisateur connecté, reçu en direct depuis
+// l'app Streamlit. Gardé uniquement en mémoire (jamais dans localStorage).
+let currentAccessToken = null;
 
 function urlBase64ToUint8Array(base64String) {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
@@ -141,7 +144,7 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 
-async function saveSubscriptionToSupabase(subscription, userId) {
+async function saveSubscriptionToSupabase(subscription, userId, accessToken) {
   const raw = subscription.toJSON();
   const body = {
     user_id: userId,
@@ -154,7 +157,7 @@ async function saveSubscriptionToSupabase(subscription, userId) {
     headers: {
       "Content-Type": "application/json",
       "apikey": SUPABASE_ANON_KEY,
-      "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+      "Authorization": `Bearer ${accessToken}`,
       "Prefer": "resolution=merge-duplicates",
     },
     body: JSON.stringify(body),
@@ -165,14 +168,16 @@ async function saveSubscriptionToSupabase(subscription, userId) {
   }
 }
 
-function waitForUserId(timeoutMs) {
-  // Attend que currentUserId soit connu (reçu depuis l'app via
-  // postMessage), sans dépasser timeoutMs — au cas où l'utilisateur tape
-  // "Activer" avant que le message ait eu le temps d'arriver.
+function waitForSession(timeoutMs) {
+  // Attend que l'identifiant ET le jeton de session soient reçus depuis
+  // l'app (postMessage), sans dépasser timeoutMs — au cas où l'utilisateur
+  // tape "Activer" avant que le message ait eu le temps d'arriver.
   return new Promise(function (resolve) {
     const start = Date.now();
     (function check() {
-      if (currentUserId) return resolve(currentUserId);
+      if (currentUserId && currentAccessToken) {
+        return resolve({ userId: currentUserId, accessToken: currentAccessToken });
+      }
       if (Date.now() - start > timeoutMs) return resolve(null);
       setTimeout(check, 250);
     })();
@@ -248,9 +253,12 @@ async function enablePushNotifications() {
     return;
   }
 
-  const userId = await waitForUserId(5000);
-  if (!userId) {
-    alert("Connecte-toi d'abord dans l'app, puis réessaie d'activer les notifications.");
+  const session = await waitForSession(6000);
+  if (!session) {
+    alert("Connecte-toi d'abord dans l'app, puis réessaie. Si tu es déjà connecté, " +
+          "déconnecte-toi puis reconnecte-toi pour que la session soit transmise. " +
+          "(identifiant reçu : " + (currentUserId ? "oui" : "non") +
+          ", jeton reçu : " + (currentAccessToken ? "oui" : "non") + ")");
     return;
   }
 
@@ -260,7 +268,7 @@ async function enablePushNotifications() {
   }
 
   try {
-    await saveSubscriptionToSupabase(subscription, userId);
+    await saveSubscriptionToSupabase(subscription, session.userId, session.accessToken);
   } catch (e) {
     alert("⚠️ Échec de l'enregistrement côté serveur : " + e.message);
     return;
@@ -280,7 +288,7 @@ function maybeShowPushBanner() {
 
 // On affiche la bannière après un court délai, qu'on ait déjà reçu ou non
 // l'identifiant de l'utilisateur via postMessage (voir enablePushNotifications
-// et waitForUserId, qui gèrent le cas où il n'est pas encore arrivé) — pour
+// et waitForSession, qui gèrent le cas où il n'est pas encore arrivé) — pour
 // ne jamais dépendre d'un timing parfait entre le chargement de la coquille
 // et celui de l'app Streamlit à l'intérieur.
 setTimeout(maybeShowPushBanner, 2500);
@@ -410,6 +418,9 @@ window.addEventListener("message", function (event) {
   if (event.data && event.data.type === "bnb_logged_in" && event.data.user_id) {
     currentUserId = event.data.user_id;
     localStorage.setItem("bnb_current_user_id", currentUserId);
+    if (event.data.access_token) {
+      currentAccessToken = event.data.access_token;
+    }
     maybeShowPushBanner();
   }
 
