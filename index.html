@@ -119,8 +119,8 @@
 // ⚠️ À remplacer par tes vraies valeurs Supabase (visibles dans
 // Project Settings > API — l'URL du projet et la clé "anon public",
 // qui est déjà utilisée publiquement ailleurs dans l'app, ex: call.html).
-const SUPABASE_URL = "SUPABASE_URL_ICI";
-const SUPABASE_ANON_KEY = "SUPABASE_ANON_KEY_ICI";
+const SUPABASE_URL = "https://qswsccuuyxunymzwngyv.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFzd3NjY3V1eXh1bnltenduZ3l2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgxNDQzNDUsImV4cCI6MjEwMzcyMDM0NX0.slbvmhh89XgRy2lpAoYKS4QbsLQsBRmuw0ccw92FkeE";
 
 // Clé publique VAPID (générée une fois, ne change jamais). La clé privée
 // correspondante reste uniquement côté serveur Python (secrets Streamlit).
@@ -179,12 +179,36 @@ function waitForUserId(timeoutMs) {
   });
 }
 
+function isStandaloneMode() {
+  return (window.navigator.standalone === true) ||
+    (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+}
+
 async function enablePushNotifications() {
-  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
-    alert("⚠️ Les notifications push ne sont pas supportées sur ce navigateur.");
+  if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+    alert("⚠️ Les notifications push ne sont pas supportées ici. Mode standalone : " +
+          (isStandaloneMode() ? "oui" : "non") +
+          ". Sur iPhone, ouvre l'appli depuis l'icône de l'écran d'accueil (pas depuis Safari).");
     return;
   }
 
+  // Diagnostic : état de la permission AVANT la demande, et durée de la
+  // demande. Une durée très courte (quelques ms) signifie qu'aucune fenêtre
+  // d'autorisation n'a été affichée : le système a répondu tout seul.
+  const permissionBefore = Notification.permission;
+  const standalone = isStandaloneMode();
+
+  if (permissionBefore === "denied") {
+    alert("Les notifications sont bloquées pour cette appli.\n\n" +
+          "iPhone : Réglages > Notifications > BnB Connect > Autoriser.\n" +
+          "Samsung : appui long sur l'icône > Infos sur l'appli > Notifications > Autoriser.\n\n" +
+          "Puis ferme et rouvre l'appli.");
+    return;
+  }
+
+  // IMPORTANT : requestPermission doit être appelé directement dans le clic,
+  // sans aucun await avant (sinon iOS ne reconnaît plus le geste).
+  const t0 = Date.now();
   let permission;
   try {
     permission = await Notification.requestPermission();
@@ -192,8 +216,13 @@ async function enablePushNotifications() {
     alert("⚠️ Erreur lors de la demande de permission : " + e.message);
     return;
   }
+  const elapsed = Date.now() - t0;
+
   if (permission !== "granted") {
-    alert("La permission de notification a été refusée (" + permission + ").");
+    alert("La permission de notification a été refusée (" + permission + ").\n\n" +
+          "Détails : avant = " + permissionBefore +
+          ", durée = " + elapsed + " ms" +
+          ", mode standalone = " + (standalone ? "oui" : "non") + ".");
     return;
   }
 
@@ -222,6 +251,11 @@ async function enablePushNotifications() {
   const userId = await waitForUserId(5000);
   if (!userId) {
     alert("Connecte-toi d'abord dans l'app, puis réessaie d'activer les notifications.");
+    return;
+  }
+
+  if (SUPABASE_URL.indexOf("_ICI") !== -1 || SUPABASE_ANON_KEY.indexOf("_ICI") !== -1) {
+    alert("⚠️ SUPABASE_URL et SUPABASE_ANON_KEY n'ont pas été remplacés dans index.html.");
     return;
   }
 
