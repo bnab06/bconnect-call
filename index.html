@@ -391,6 +391,47 @@ function markCallEndedInSupabase(callUrl) {
   } catch (e) {}
 }
 
+function closeCallView() {
+  showChatView();
+  switchBtn.style.display = "none";
+  callFrame.src = "";
+}
+
+// Au retour dans l'appli (après un passage en arrière-plan, ou un clic sur une
+// notification), si une page d'appel est encore affichée alors que l'appel est
+// terminé ou introuvable, on la ferme et on revient au chat : sinon elle
+// recouvrait l'appli, sans aucun bouton pour répondre à un nouvel appel.
+async function checkCallStillActive() {
+  try {
+    const src = callFrame.getAttribute("src");
+    if (!src) return;
+    const u = new URL(src);
+    const callId = u.searchParams.get("call_id");
+    if (!callId) return;
+    const sbUrl = u.searchParams.get("sb_url") || SUPABASE_URL;
+    const sbKey = u.searchParams.get("sb_key") || SUPABASE_ANON_KEY;
+    const tokens = [u.searchParams.get("sb_token"), currentAccessToken].filter(function (t, i, arr) {
+      return t && arr.indexOf(t) === i;
+    });
+    for (let i = 0; i < tokens.length; i++) {
+      const resp = await fetch(sbUrl + "/rest/v1/calls?id=eq." + encodeURIComponent(callId) + "&select=status", {
+        headers: { "apikey": sbKey, "Authorization": "Bearer " + tokens[i] },
+      });
+      if (!resp.ok) continue;
+      const rows = await resp.json();
+      const status = rows && rows[0] ? rows[0].status : null;
+      if (status === null || status === "ended" || status === "declined") { closeCallView(); }
+      return;
+    }
+  } catch (e) {}
+}
+document.addEventListener("visibilitychange", function () {
+  if (!document.hidden) { setTimeout(checkCallStillActive, 600); }
+});
+window.addEventListener("pageshow", function () {
+  setTimeout(checkCallStillActive, 600);
+});
+
 function toggleCallChatView() {
   if (showingCall) {
     showChatView();
