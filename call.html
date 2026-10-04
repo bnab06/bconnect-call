@@ -54,6 +54,14 @@
     font-size: 13px;
     max-width: 55%;
   }
+  /* iPhone : le haut de l'écran est occupé par l'encoche / la barre d'état,
+     on décale donc le message et la vignette caméra vers le bas. */
+  @supports (-webkit-touch-callout: none) {
+    #bnb-status,
+    #bnb-local-wrapper {
+      top: max(66px, calc(env(safe-area-inset-top, 0px) + 24px));
+    }
+  }
   #bnb-controls {
     position: absolute;
     bottom: 16px;
@@ -115,6 +123,13 @@
     const sbKey = params.get('sb_key');
     const sbToken = params.get('sb_token');
     const peerName = params.get('peer_name') || "L'autre personne";
+
+    // iPhone : une catégorie audio "lecture seule" empêche d'utiliser le micro
+    // ("catégorie incompatible avec la capture audio"). On demande explicitement
+    // une catégorie qui autorise lecture ET enregistrement.
+    try {
+        if (navigator.audioSession) { navigator.audioSession.type = "play-and-record"; }
+    } catch (e) {}
 
     // Signale à la page parente (la coquille bconnect-call, si cette page
     // est affichée dans son second cadre d'appel) que l'appel est terminé,
