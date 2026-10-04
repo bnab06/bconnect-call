@@ -1,466 +1,549 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>BnB Connect — Appel</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<title>BnB Connect</title>
+
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+<link rel="icon" href="icons/favicon-32.png" />
+<meta name="theme-color" content="#6C5CE7" />
+
+<!-- Nécessaire pour que l'ajout à l'écran d'accueil iOS s'ouvre en plein
+     écran (mode standalone), sans quoi Safari s'ouvre en mode navigateur
+     normal même une fois l'icône ajoutée. -->
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="BnB Connect" />
+
 <style>
   html, body {
     margin: 0;
     padding: 0;
-    background: #1E1E2E;
-    font-family: -apple-system, sans-serif;
     height: 100%;
-  }
-  #bnb-call-root {
-    position: relative;
-    width: 100vw;
-    height: 100vh;
-    background: #1E1E2E;
     overflow: hidden;
+    background: #6C5CE7;
   }
-  #bnb-remote-video {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    background: #111;
-  }
-  #bnb-local-wrapper {
-    position: absolute;
-    top: 24px;
-    right: 24px;
-    width: 100px;
-    height: 130px;
-    border-radius: 14px;
-    overflow: hidden;
-    border: 2px solid white;
-    cursor: grab;
-    touch-action: none;
-    background: #333;
-  }
-  #bnb-local-video {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-  #bnb-status {
-    position: absolute;
-    top: 24px;
-    left: 24px;
-    color: white;
-    background: rgba(0,0,0,0.55);
-    padding: 8px 16px;
-    border-radius: 20px;
-    font-size: 13px;
-    max-width: 55%;
-  }
-  /* iPhone : le haut de l'écran est occupé par l'encoche / la barre d'état,
-     on décale donc le message et la vignette caméra vers le bas. */
-  @supports (-webkit-touch-callout: none) {
-    #bnb-status,
-    #bnb-local-wrapper {
-      top: max(66px, calc(env(safe-area-inset-top, 0px) + 24px));
-    }
-  }
-  #bnb-controls {
-    position: absolute;
-    bottom: 16px;
+  #app-frame {
+    position: fixed;
+    top: 0;
     left: 0;
-    right: 0;
-    display: flex;
-    justify-content: center;
-    gap: 16px;
-  }
-  .bnb-btn {
-    width: 50px;
-    height: 50px;
-    border-radius: 50%;
+    width: 100%;
+    height: 100%;
     border: none;
+  }
+  #push-banner {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: env(safe-area-inset-bottom, 12px);
+    background: linear-gradient(135deg, #6C5CE7, #A29BFE);
+    color: white;
+    padding: 14px 16px;
+    border-radius: 14px;
+    font-family: -apple-system, sans-serif;
+    font-size: 14px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+    z-index: 9999;
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  #push-banner button {
+    background: white;
+    color: #6C5CE7;
+    border: none;
+    border-radius: 10px;
+    padding: 8px 14px;
+    font-weight: 700;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+  #push-banner .dismiss {
+    background: transparent;
+    color: white;
+    font-size: 18px;
+    padding: 0 6px;
+    font-weight: 400;
+  }
+  #call-frame {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: none;
+    z-index: 500;
+  }
+  #switch-view-btn {
+    position: fixed;
+    right: 14px;
+    /* Sous la vignette caméra locale de call.html (24px + 130px de haut),
+       pour ne jamais la recouvrir ni les contrôles du bas. */
+    top: calc(env(safe-area-inset-top, 0px) + 168px);
     background: #6C5CE7;
     color: white;
-    font-size: 20px;
+    border: none;
+    border-radius: 24px;
+    padding: 12px 18px;
+    font-family: -apple-system, sans-serif;
+    font-weight: 700;
+    font-size: 14px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+    z-index: 9998;
+    display: none;
   }
-  .bnb-btn.hangup {
-    background: #E74C3C;
+  /* iPhone : la vignette caméra de la page d'appel est décalée vers le bas
+     (encoche), le bouton de bascule l'est donc aussi pour ne pas la recouvrir. */
+  @supports (-webkit-touch-callout: none) {
+    #switch-view-btn {
+      top: max(222px, calc(env(safe-area-inset-top, 0px) + 168px));
+    }
   }
 </style>
 </head>
 <body>
 
-<div id="bnb-call-root">
-  <video id="bnb-remote-video" autoplay playsinline></video>
-  <audio id="bnb-remote-audio" autoplay></audio>
+<iframe id="app-frame" allow="camera; microphone; autoplay"></iframe>
+<script>
+// Chargement de l'app Streamlit. Si un jeton "Rester connecté" est gardé
+// par cette page (stockage de premier niveau, fiable), on l'ajoute à l'URL
+// (?rt=...) : l'app s'en sert pour rouvrir la session sans nouvelle saisie.
+(function () {
+  var url = "https://bconnect-gc85p96w6l29zihyx5zs4e.streamlit.app/?embed=true";
+  var token = null;
+  try { token = localStorage.getItem("bnb_refresh_token"); } catch (e) {}
+  if (token) { url += "&rt=" + encodeURIComponent(token); }
+  document.getElementById("app-frame").src = url;
+})();
+</script>
 
-  <div id="bnb-local-wrapper">
-    <video id="bnb-local-video" autoplay playsinline muted></video>
-  </div>
+<iframe id="call-frame" allow="camera; microphone; autoplay"></iframe>
 
-  <div id="bnb-status">Connexion...</div>
+<button id="switch-view-btn">📞 Voir l'appel</button>
 
-  <div id="bnb-controls">
-    <button class="bnb-btn" id="bnb-toggle-mic">🎤</button>
-    <button class="bnb-btn" id="bnb-toggle-cam">📷</button>
-    <button class="bnb-btn hangup" id="bnb-hangup">📵</button>
+<div id="push-banner">
+  <span>🔔 Active les notifications pour ne manquer aucun appel</span>
+  <div style="display:flex; align-items:center; gap:6px;">
+    <button id="push-enable-btn">Activer</button>
+    <button class="dismiss" id="push-dismiss-btn">✕</button>
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.0/dist/livekit-client.umd.min.js"></script>
 <script>
-(async function () {
-    function log(msg) {
-        console.log(msg);
+// ⚠️ À remplacer par tes vraies valeurs Supabase (visibles dans
+// Project Settings > API — l'URL du projet et la clé "anon public",
+// qui est déjà utilisée publiquement ailleurs dans l'app, ex: call.html).
+const SUPABASE_URL = "https://qswsccuuyxunymzwngyv.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFzd3NjY3V1eXh1bnltenduZ3l2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgxNDQzNDUsImV4cCI6MjEwMzcyMDM0NX0.slbvmhh89XgRy2lpAoYKS4QbsLQsBRmuw0ccw92FkeE";
+
+// Clé publique VAPID (générée une fois, ne change jamais). La clé privée
+// correspondante reste uniquement côté serveur Python (secrets Streamlit).
+const VAPID_PUBLIC_KEY = "BNM006T0IWmNdS2vhFN10zIbHAcCjZO6L6z379CmlWcTsW3TBlAudghEp-v2Xyhb2colveywVjePLro6rcaAuco";
+
+const STREAMLIT_APP_ORIGIN = "https://bconnect-gc85p96w6l29zihyx5zs4e.streamlit.app";
+
+let currentUserId = localStorage.getItem("bnb_current_user_id") || null;
+// Jeton de session Supabase de l'utilisateur connecté, reçu en direct depuis
+// l'app Streamlit. Gardé uniquement en mémoire (jamais dans localStorage).
+let currentAccessToken = null;
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i++) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+async function saveSubscriptionToSupabase(subscription, userId, accessToken) {
+  const raw = subscription.toJSON();
+  const body = {
+    user_id: userId,
+    endpoint: raw.endpoint,
+    p256dh: raw.keys.p256dh,
+    auth: raw.keys.auth,
+  };
+  const resp = await fetch(`${SUPABASE_URL}/rest/v1/push_subscriptions?on_conflict=endpoint`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "apikey": SUPABASE_ANON_KEY,
+      "Authorization": `Bearer ${accessToken}`,
+      "Prefer": "resolution=merge-duplicates",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`Supabase a refusé l'enregistrement (code ${resp.status}) : ${errText}`);
+  }
+}
+
+function waitForSession(timeoutMs) {
+  // Attend que l'identifiant ET le jeton de session soient reçus depuis
+  // l'app (postMessage), sans dépasser timeoutMs — au cas où l'utilisateur
+  // tape "Activer" avant que le message ait eu le temps d'arriver.
+  return new Promise(function (resolve) {
+    const start = Date.now();
+    (function check() {
+      if (currentUserId && currentAccessToken) {
+        return resolve({ userId: currentUserId, accessToken: currentAccessToken });
+      }
+      if (Date.now() - start > timeoutMs) return resolve(null);
+      setTimeout(check, 250);
+    })();
+  });
+}
+
+function isStandaloneMode() {
+  return (window.navigator.standalone === true) ||
+    (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+}
+
+async function enablePushNotifications() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+    alert("⚠️ Les notifications push ne sont pas supportées ici. Mode standalone : " +
+          (isStandaloneMode() ? "oui" : "non") +
+          ". Sur iPhone, ouvre l'appli depuis l'icône de l'écran d'accueil (pas depuis Safari).");
+    return;
+  }
+
+  // Diagnostic : état de la permission AVANT la demande, et durée de la
+  // demande. Une durée très courte (quelques ms) signifie qu'aucune fenêtre
+  // d'autorisation n'a été affichée : le système a répondu tout seul.
+  const permissionBefore = Notification.permission;
+  const standalone = isStandaloneMode();
+
+  if (permissionBefore === "denied") {
+    alert("Les notifications sont bloquées pour cette appli.\n\n" +
+          "iPhone : Réglages > Notifications > BnB Connect > Autoriser.\n" +
+          "Samsung : appui long sur l'icône > Infos sur l'appli > Notifications > Autoriser.\n\n" +
+          "Puis ferme et rouvre l'appli.");
+    return;
+  }
+
+  // IMPORTANT : requestPermission doit être appelé directement dans le clic,
+  // sans aucun await avant (sinon iOS ne reconnaît plus le geste).
+  const t0 = Date.now();
+  let permission;
+  try {
+    permission = await Notification.requestPermission();
+  } catch (e) {
+    alert("⚠️ Erreur lors de la demande de permission : " + e.message);
+    return;
+  }
+  const elapsed = Date.now() - t0;
+
+  if (permission !== "granted") {
+    alert("La permission de notification a été refusée (" + permission + ").\n\n" +
+          "Détails : avant = " + permissionBefore +
+          ", durée = " + elapsed + " ms" +
+          ", mode standalone = " + (standalone ? "oui" : "non") + ".");
+    return;
+  }
+
+  let registration;
+  try {
+    registration = await navigator.serviceWorker.ready;
+  } catch (e) {
+    alert("⚠️ Le service worker n'est pas prêt : " + e.message);
+    return;
+  }
+
+  let subscription;
+  try {
+    subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
     }
-    window.onerror = function (message, source, lineno, colno, error) {
-        log("❌ ERREUR JS: " + message + " (ligne " + lineno + ")");
-    };
+  } catch (e) {
+    alert("⚠️ Échec de l'abonnement push : " + e.message);
+    return;
+  }
 
-    const params = new URLSearchParams(window.location.search);
-    const livekitUrl = params.get('url');
-    const token = params.get('token');
-    const showVideo = params.get('type') === 'video';
-    const callId = params.get('call_id');
-    const sbUrl = params.get('sb_url');
-    const sbKey = params.get('sb_key');
-    const sbToken = params.get('sb_token');
-    const peerName = params.get('peer_name') || "L'autre personne";
+  const session = await waitForSession(6000);
+  if (!session) {
+    alert("Connecte-toi d'abord dans l'app, puis réessaie. Si tu es déjà connecté, " +
+          "déconnecte-toi puis reconnecte-toi pour que la session soit transmise. " +
+          "(identifiant reçu : " + (currentUserId ? "oui" : "non") +
+          ", jeton reçu : " + (currentAccessToken ? "oui" : "non") + ")");
+    return;
+  }
 
-    // iPhone : une catégorie audio "lecture seule" empêche d'utiliser le micro
-    // ("catégorie incompatible avec la capture audio"). On demande explicitement
-    // une catégorie qui autorise lecture ET enregistrement.
-    try {
-        if (navigator.audioSession) { navigator.audioSession.type = "play-and-record"; }
-    } catch (e) {}
+  if (SUPABASE_URL.indexOf("_ICI") !== -1 || SUPABASE_ANON_KEY.indexOf("_ICI") !== -1) {
+    alert("⚠️ SUPABASE_URL et SUPABASE_ANON_KEY n'ont pas été remplacés dans index.html.");
+    return;
+  }
 
-    // Signale à la page parente (la coquille bconnect-call, si cette page
-    // est affichée dans son second cadre d'appel) que l'appel est terminé,
-    // pour qu'elle masque automatiquement le bouton de bascule. Sans effet
-    // si cette page est ouverte seule dans un onglet classique (il n'y a
-    // alors personne pour écouter ce message).
-    // ⚠️ La coquille ferme ce cadre dès qu'elle reçoit ce message : il ne
-    // faut donc l'envoyer qu'APRÈS avoir enregistré la fin d'appel (voir
-    // notifyCallEnded), sinon la requête en cours est interrompue.
-    function notifyParentCallEnded() {
-        try {
-            window.parent.postMessage({ type: "bnb_call_ended" }, "*");
-        } catch (e) {}
+  try {
+    await saveSubscriptionToSupabase(subscription, session.userId, session.accessToken);
+  } catch (e) {
+    alert("⚠️ Échec de l'enregistrement côté serveur : " + e.message);
+    return;
+  }
+
+  localStorage.setItem("bnb_push_enabled", "1");
+  document.getElementById("push-banner").style.display = "none";
+  alert("✅ Notifications activées avec succès !");
+}
+
+function maybeShowPushBanner() {
+  if (!("Notification" in window)) return;
+  if (Notification.permission === "granted" && localStorage.getItem("bnb_push_enabled") === "1") return;
+  if (Notification.permission === "denied") return;
+  document.getElementById("push-banner").style.display = "flex";
+}
+
+// On affiche la bannière après un court délai, qu'on ait déjà reçu ou non
+// l'identifiant de l'utilisateur via postMessage (voir enablePushNotifications
+// et waitForSession, qui gèrent le cas où il n'est pas encore arrivé) — pour
+// ne jamais dépendre d'un timing parfait entre le chargement de la coquille
+// et celui de l'app Streamlit à l'intérieur.
+setTimeout(maybeShowPushBanner, 2500);
+
+document.getElementById("push-enable-btn").addEventListener("click", enablePushNotifications);
+document.getElementById("push-dismiss-btn").addEventListener("click", function () {
+  document.getElementById("push-banner").style.display = "none";
+});
+
+// --- Bascule entre le chat et l'appel ------------------------------
+// En mode "standalone" (app installée sur l'écran d'accueil), il n'y a
+// pas de vrais onglets de navigateur : un "nouvel onglet" prendrait toute
+// la place sans retour possible. On garde donc l'appel dans un second
+// cadre à l'intérieur de cette même page, avec un bouton pour basculer
+// manuellement entre les deux — les deux restent actifs en parallèle.
+const appFrame = document.getElementById("app-frame");
+const callFrame = document.getElementById("call-frame");
+const switchBtn = document.getElementById("switch-view-btn");
+let showingCall = false;
+
+function showCallView() {
+  callFrame.style.display = "block";
+  switchBtn.textContent = "💬 Revenir au chat";
+  showingCall = true;
+}
+
+function showChatView() {
+  callFrame.style.display = "none";
+  switchBtn.textContent = "📞 Voir l'appel";
+  showingCall = false;
+}
+
+function ensureSwitchButtonVisible() {
+  // Si la position enregistrée du bouton le place hors de l'écran (autre
+  // taille d'écran, rotation...), on le remet à sa place par défaut.
+  try {
+    if (getComputedStyle(switchBtn).display === "none") return;
+    const r = switchBtn.getBoundingClientRect();
+    const outside = r.left < 0 || r.top < 0 ||
+                    r.right > window.innerWidth || r.bottom > window.innerHeight;
+    if (outside) {
+      switchBtn.style.left = "";
+      switchBtn.style.top = "";
+      switchBtn.style.right = "";
+      try { localStorage.removeItem("bnb_switch_btn_pos"); } catch (e) {}
     }
+  } catch (e) {}
+}
+window.addEventListener("resize", ensureSwitchButtonVisible);
 
-    let callAlreadyEnded = false;
-    let endPromise = null;
+function markCallEndedInSupabase(callUrl) {
+  // Filet de sécurité : quand la page d'appel signale la fin de l'appel, on
+  // s'assure nous-mêmes que la base le sait (passage de "sonne" ou "en cours"
+  // à "terminé"), pour que l'appli de chat n'affiche plus de boutons
+  // "Rejoindre / Terminer l'appel". Sans effet si c'est déjà fait (la
+  // condition sur le statut évite d'écraser "refusé" ou "terminé").
+  try {
+    if (!callUrl) return;
+    const u = new URL(callUrl);
+    const callId = u.searchParams.get("call_id");
+    const sbUrl = u.searchParams.get("sb_url") || SUPABASE_URL;
+    const sbKey = u.searchParams.get("sb_key") || SUPABASE_ANON_KEY;
+    if (!callId) return;
+    const tokens = [u.searchParams.get("sb_token"), currentAccessToken].filter(function (t, i, arr) {
+      return t && arr.indexOf(t) === i;
+    });
+    (function tryNext(i) {
+      if (i >= tokens.length) return;
+      fetch(sbUrl + "/rest/v1/calls?id=eq." + encodeURIComponent(callId) + "&status=in.(ringing,ongoing)", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": sbKey,
+          "Authorization": "Bearer " + tokens[i],
+          "Prefer": "return=minimal",
+        },
+        body: JSON.stringify({ status: "ended", ended_at: new Date().toISOString() }),
+      }).then(function (resp) {
+        if (!resp.ok) { tryNext(i + 1); }
+      }).catch(function () { tryNext(i + 1); });
+    })(0);
+  } catch (e) {}
+}
 
-    // Enregistre la fin d'appel dans Supabase, puis seulement ensuite
-    // prévient la page parente. Appelable plusieurs fois (déconnexion LiveKit
-    // + bouton raccrocher) : toutes les invocations partagent la même requête.
-    function notifyCallEnded() {
-        if (endPromise) { return endPromise; }
+function toggleCallChatView() {
+  if (showingCall) {
+    showChatView();
+  } else {
+    showCallView();
+  }
+}
 
-        if (callAlreadyEnded || !callId || !sbUrl || !sbKey || !sbToken) {
-            log("⚠️ Notification impossible : paramètre manquant (callId=" + callId + ", sbUrl=" + (sbUrl ? "ok" : "manquant") + ", sbKey=" + (sbKey ? "ok" : "manquant") + ", sbToken=" + (sbToken ? "ok" : "manquant") + ")");
-            notifyParentCallEnded();
-            endPromise = Promise.resolve();
-            return endPromise;
-        }
+// Bouton déplaçable au doigt (comme la vignette caméra locale dans
+// call.html), avec une petite tolérance de mouvement pour distinguer un
+// simple tap (bascule chat/appel) d'un vrai glissé (repositionnement).
+(function makeSwitchButtonDraggable(el) {
+  let dragging = false;
+  let moved = false;
+  let offsetX = 0, offsetY = 0;
+  let startX = 0, startY = 0;
+  let suppressNextClick = false;
 
-        callAlreadyEnded = true;
-        endPromise = (async function () {
-            try {
-                const controller = new AbortController();
-                const timer = setTimeout(function () { controller.abort(); }, 4000);
-                const resp = await fetch(`${sbUrl}/rest/v1/calls?id=eq.${callId}`, {
-                    method: 'PATCH',
-                    headers: {
-                        'apikey': sbKey,
-                        'Authorization': `Bearer ${sbToken}`,
-                        'Content-Type': 'application/json',
-                        // return=representation : permet de vérifier qu'une ligne a
-                        // réellement été modifiée (sinon une règle de sécurité peut
-                        // refuser la modification sans aucune erreur).
-                        'Prefer': 'return=representation',
-                    },
-                    body: JSON.stringify({ status: 'ended', ended_at: new Date().toISOString() }),
-                    signal: controller.signal,
-                });
-                clearTimeout(timer);
-                if (resp.ok) {
-                    let rows = [];
-                    try { rows = await resp.json(); } catch (e) {}
-                    if (Array.isArray(rows) && rows.length > 0) {
-                        console.log("📤 Statut 'terminé' confirmé par le serveur (code " + resp.status + ").");
-                    } else {
-                        log("❌ Aucune ligne modifiée : règle de sécurité (RLS) de la table calls, ou appel introuvable.");
-                        statusEl.innerText += " (⚠️ fin d'appel non enregistrée : droits)";
-                    }
-                } else {
-                    const errText = await resp.text();
-                    log("❌ Le serveur a REJETÉ la mise à jour (code " + resp.status + "): " + errText);
-                    statusEl.innerText += " (⚠️ fin d'appel non enregistrée : code " + resp.status + ")";
-                }
-            } catch (e) {
-                log("⚠️ Impossible de notifier l'app principale : " + e.message);
-            }
-            notifyParentCallEnded();
-        })();
-        return endPromise;
+  function start(x, y) {
+    dragging = true;
+    moved = false;
+    startX = x;
+    startY = y;
+    const rect = el.getBoundingClientRect();
+    offsetX = x - rect.left;
+    offsetY = y - rect.top;
+  }
+
+  function move(x, y) {
+    if (!dragging) return;
+    if (Math.abs(x - startX) > 6 || Math.abs(y - startY) > 6) moved = true;
+    if (!moved) return;
+    const maxLeft = window.innerWidth - el.offsetWidth - 4;
+    const maxTop = window.innerHeight - el.offsetHeight - 4;
+    const newLeft = Math.max(4, Math.min(x - offsetX, maxLeft));
+    const newTop = Math.max(4, Math.min(y - offsetY, maxTop));
+    el.style.left = newLeft + "px";
+    el.style.top = newTop + "px";
+    el.style.right = "auto";
+  }
+
+  function end() {
+    if (!dragging) return;
+    dragging = false;
+    if (moved) {
+      suppressNextClick = true;
+      try {
+        localStorage.setItem(
+          "bnb_switch_btn_pos",
+          JSON.stringify({ left: el.style.left, top: el.style.top })
+        );
+      } catch (e) {}
     }
+  }
 
-    let callAlreadyMarkedOngoing = false;
-    async function notifyCallOngoing() {
-        if (callAlreadyMarkedOngoing || !callId || !sbUrl || !sbKey || !sbToken) return;
-        callAlreadyMarkedOngoing = true;
-        try {
-            await fetch(`${sbUrl}/rest/v1/calls?id=eq.${callId}`, {
-                method: 'PATCH',
-                headers: {
-                    'apikey': sbKey,
-                    'Authorization': `Bearer ${sbToken}`,
-                    'Content-Type': 'application/json',
-                    'Prefer': 'return=minimal',
-                },
-                body: JSON.stringify({ status: 'ongoing', answered: true }),
-            });
-            console.log("📤 Statut 'en cours' confirmé par le serveur.");
-        } catch (e) {
-            log("⚠️ Impossible de notifier le démarrage : " + e.message);
-        }
-    }
+  el.addEventListener("mousedown", (e) => start(e.clientX, e.clientY));
+  document.addEventListener("mousemove", (e) => move(e.clientX, e.clientY));
+  document.addEventListener("mouseup", end);
 
-    // Surveille le statut de l'appel côté app principale : si l'autre
-    // personne refuse ou raccroche depuis l'app (avant même d'avoir
-    // rejoint cette page), on se déconnecte proprement au lieu de rester
-    // bloqué en "attente" indéfiniment.
-    let statusCheckInterval = null;
-    if (callId && sbUrl && sbKey && sbToken) {
-        statusCheckInterval = setInterval(async () => {
-            try {
-                const resp = await fetch(`${sbUrl}/rest/v1/calls?id=eq.${callId}&select=status`, {
-                    headers: { 'apikey': sbKey, 'Authorization': `Bearer ${sbToken}` },
-                });
-                const rows = await resp.json();
-                const remoteStatus = rows && rows[0] ? rows[0].status : null;
-                if (remoteStatus === 'declined' || remoteStatus === 'ended') {
-                    console.log("📥 Statut distant détecté : " + remoteStatus + ". Déconnexion...");
-                    clearInterval(statusCheckInterval);
-                    // Le statut est déjà enregistré côté serveur : inutile de le réécrire
-                    // (et on ne doit surtout pas écraser "refusé" par "terminé").
-                    callAlreadyEnded = true;
-                    endPromise = Promise.resolve();
-                    try {
-                        await room.localParticipant.setCameraEnabled(false);
-                        await room.localParticipant.setMicrophoneEnabled(false);
-                    } catch (e) {}
-                    room.disconnect();
-                    statusEl.innerText = remoteStatus === 'declined'
-                        ? peerName + " a refusé l'appel."
-                        : "Appel avec " + peerName + " terminé. Tu peux fermer cet onglet.";
-                    notifyParentCallEnded();
-                }
-            } catch (e) {
-                // Erreur réseau ponctuelle, sans gravité : on réessaiera au prochain cycle.
-            }
-        }, 3000);
-    }
+  el.addEventListener("touchstart", (e) => { const t = e.touches[0]; start(t.clientX, t.clientY); }, { passive: true });
+  document.addEventListener("touchmove", (e) => { const t = e.touches[0]; move(t.clientX, t.clientY); }, { passive: true });
+  document.addEventListener("touchend", end);
 
-    log("Démarrage. showVideo=" + showVideo);
-    log("URL LiveKit: " + (livekitUrl ? livekitUrl : "MANQUANTE"));
-    log("Token présent: " + (token ? "oui (" + token.length + " caractères)" : "MANQUANT"));
-
-    const LK = LivekitClient;
-    log("Version livekit-client chargée: " + (LK.version || "inconnue"));
-    const room = new LK.Room();
-
-    const statusEl = document.getElementById('bnb-status');
-    const remoteVideoEl = document.getElementById('bnb-remote-video');
-    const remoteAudioEl = document.getElementById('bnb-remote-audio');
-    const localVideoEl = document.getElementById('bnb-local-video');
-    const localWrapper = document.getElementById('bnb-local-wrapper');
-
-    if (!showVideo) {
-        localWrapper.style.display = 'none';
-        document.getElementById('bnb-toggle-cam').style.display = 'none';
-    }
-
-    if (!livekitUrl || !token) {
-        statusEl.innerText = "❌ Lien d'appel invalide (paramètres manquants).";
-        log("ARRÊT : paramètres manquants.");
+  el.addEventListener(
+    "click",
+    function (e) {
+      if (suppressNextClick) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        suppressNextClick = false;
         return;
+      }
+      toggleCallChatView();
+    },
+    true
+  );
+
+  // Restaure la position laissée la dernière fois, si elle existe.
+  try {
+    const saved = JSON.parse(localStorage.getItem("bnb_switch_btn_pos") || "null");
+    if (saved && saved.left && saved.top) {
+      el.style.left = saved.left;
+      el.style.top = saved.top;
+      el.style.right = "auto";
     }
+  } catch (e) {}
+})(switchBtn);
 
-    // Écoute de TOUS les événements pertinents de la room, avant même
-    // de se connecter, pour ne rien manquer.
-    room.on(LK.RoomEvent.ConnectionStateChanged, (state) => {
-        log("État de connexion: " + state);
-    });
-    room.on(LK.RoomEvent.ParticipantConnected, (p) => {
-        log("👤 Participant connecté: " + p.identity);
-        statusEl.innerText = "Connecté avec " + peerName + "...";
-        notifyCallOngoing();
-    });
-    room.on(LK.RoomEvent.ParticipantDisconnected, (p) => {
-        log("👤 Participant déconnecté: " + (p ? p.identity : "?"));
-        statusEl.innerText = peerName + " a quitté l'appel.";
-    });
-    room.on(LK.RoomEvent.TrackPublished, (publication, participant) => {
-        log("📡 Track PUBLIÉE par " + participant.identity + " (" + publication.kind + ")");
-    });
-    room.on(LK.RoomEvent.TrackSubscribed, (track, publication, participant) => {
-        log("✅ Track REÇUE de " + participant.identity + " (" + track.kind + ")");
-        statusEl.innerText = "En cours d'appel avec " + peerName;
-        notifyCallOngoing();
-        if (track.kind === 'video') {
-            track.attach(remoteVideoEl);
-        } else if (track.kind === 'audio') {
-            track.attach(remoteAudioEl);
-        }
-    });
-    room.on(LK.RoomEvent.TrackSubscriptionFailed, (trackSid, participant) => {
-        log("❌ ÉCHEC subscription track " + trackSid + " de " + participant.identity);
-    });
-    room.on(LK.RoomEvent.TrackUnpublished, (publication, participant) => {
-        log("📡 Track dépubliée par " + participant.identity);
-    });
-    room.on(LK.RoomEvent.LocalTrackPublished, (publication) => {
-        log("📤 MA track publiée: " + publication.kind);
-    });
-    room.on(LK.RoomEvent.MediaDevicesError, (e) => {
-        log("⚠️ Erreur périphérique média: " + e.message);
-    });
-    room.on(LK.RoomEvent.Disconnected, async (reason) => {
-        log("Déconnecté. Raison: " + reason);
-        try {
-            await room.localParticipant.setCameraEnabled(false);
-            await room.localParticipant.setMicrophoneEnabled(false);
-        } catch (e) {}
-        statusEl.innerText = "Appel avec " + peerName + " terminé. Tu peux fermer cet onglet.";
-        notifyCallEnded();
-    });
-    room.on(LK.RoomEvent.Reconnecting, () => {
-        log("🔄 Reconnexion en cours...");
-    });
-    room.on(LK.RoomEvent.Reconnected, () => {
-        log("✅ Reconnecté.");
-    });
+// L'app Streamlit (à l'intérieur de l'iframe) annonce l'identifiant de
+// l'utilisateur connecté, et demande l'ouverture d'un appel, via
+// postMessage.
+window.addEventListener("message", function (event) {
+  if (event.origin !== STREAMLIT_APP_ORIGIN) return;
 
-    try {
-        log("Tentative de connexion à la room...");
-        await room.connect(livekitUrl, token);
-        log("✅ Connecté à la room. SID room: " + room.name);
-        log("Nombre de participants déjà présents: " + room.numParticipants);
-        statusEl.innerText = "Connecté. Activation du micro...";
+  // --- Jeton "Rester connecté" : gardé ici, dans le stockage de cette page ---
+  if (event.data && event.data.type === "bnb_save_refresh_token" && event.data.refresh_token) {
+    try { localStorage.setItem("bnb_refresh_token", event.data.refresh_token); } catch (e) {}
+  }
 
-        try {
-            await room.localParticipant.setMicrophoneEnabled(true);
-            log("✅ Micro activé et publié.");
-            statusEl.innerText = "En attente de l'autre participant...";
-        } catch (micErr) {
-            log("❌ ERREUR micro: " + micErr.message);
-            statusEl.innerText = "⚠️ Micro refusé : " + micErr.message;
-        }
+  if (event.data && event.data.type === "bnb_clear_refresh_token") {
+    // Déconnexion (ou jeton devenu invalide) : on oublie aussi la session
+    // en mémoire et l'identifiant, pour ne jamais abonner aux notifications
+    // un appareil au nom d'un utilisateur déconnecté.
+    try { localStorage.removeItem("bnb_refresh_token"); } catch (e) {}
+    try { localStorage.removeItem("bnb_current_user_id"); } catch (e) {}
+    currentUserId = null;
+    currentAccessToken = null;
+  }
 
-        if (showVideo) {
-            try {
-                await room.localParticipant.setCameraEnabled(true);
-                log("✅ Caméra activée et publiée.");
-                const camPub = room.localParticipant.getTrackPublication(LK.Track.Source.Camera);
-                if (camPub && camPub.track) {
-                    camPub.track.attach(localVideoEl);
-                }
-            } catch (camErr) {
-                log("❌ ERREUR caméra: " + camErr.message);
-                statusEl.innerText = "⚠️ Caméra refusée : " + camErr.message;
-            }
-        }
-
-        // Vérifie s'il y avait déjà des participants/tracks au moment
-        // de notre connexion (utile si l'autre est arrivé avant nous).
-        if (room.remoteParticipants.size > 0) {
-            statusEl.innerText = "Connecté avec " + peerName + "...";
-            notifyCallOngoing();
-        }
-        room.remoteParticipants.forEach((participant) => {
-            log("👤 Déjà présent: " + participant.identity);
-            participant.trackPublications.forEach((pub) => {
-                log("   -> track existante: " + pub.kind + " (souscrite: " + pub.isSubscribed + ")");
-            });
-        });
-
-    } catch (err) {
-        log("❌ ERREUR de connexion à la room: " + err.message);
-        statusEl.innerText = "❌ Erreur de connexion : " + err.message;
+  if (event.data && event.data.type === "bnb_request_refresh_token") {
+    // L'app (session recréée sans rechargement de page) redemande le jeton.
+    var savedToken = null;
+    try { savedToken = localStorage.getItem("bnb_refresh_token"); } catch (e) {}
+    if (savedToken && event.source) {
+      event.source.postMessage({ type: "bnb_refresh_token", refresh_token: savedToken }, event.origin);
     }
+  }
 
-    let micOn = true;
-    document.getElementById('bnb-toggle-mic').onclick = async function () {
-        micOn = !micOn;
-        await room.localParticipant.setMicrophoneEnabled(micOn);
-        this.style.opacity = micOn ? "1" : "0.5";
-        log("Micro " + (micOn ? "réactivé" : "coupé") + " manuellement.");
-    };
-
-    let camOn = true;
-    document.getElementById('bnb-toggle-cam').onclick = async function () {
-        camOn = !camOn;
-        await room.localParticipant.setCameraEnabled(camOn);
-        this.style.opacity = camOn ? "1" : "0.5";
-        log("Caméra " + (camOn ? "réactivée" : "coupée") + " manuellement.");
-    };
-
-    document.getElementById('bnb-hangup').onclick = async function () {
-        log("Raccroché manuellement.");
-        if (statusCheckInterval) clearInterval(statusCheckInterval);
-        try {
-            await room.localParticipant.setCameraEnabled(false);
-            await room.localParticipant.setMicrophoneEnabled(false);
-        } catch (e) {
-            log("⚠️ Erreur en coupant caméra/micro : " + e.message);
-        }
-        room.disconnect();
-        statusEl.innerText = "Appel avec " + peerName + " terminé. Tu peux fermer cet onglet.";
-        notifyCallEnded();
-    };
-
-    // Caméra locale déplaçable (souris + tactile)
-    let dragging = false;
-    let offsetX = 0, offsetY = 0;
-
-    function startDrag(x, y) {
-        dragging = true;
-        const rect = localWrapper.getBoundingClientRect();
-        offsetX = x - rect.left;
-        offsetY = y - rect.top;
-        localWrapper.style.cursor = 'grabbing';
+  if (event.data && event.data.type === "bnb_logged_in" && event.data.user_id) {
+    currentUserId = event.data.user_id;
+    localStorage.setItem("bnb_current_user_id", currentUserId);
+    if (event.data.access_token) {
+      currentAccessToken = event.data.access_token;
     }
+    maybeShowPushBanner();
+  }
 
-    function doDrag(x, y) {
-        if (!dragging) return;
-        const rootRect = document.getElementById('bnb-call-root').getBoundingClientRect();
-        let newLeft = x - rootRect.left - offsetX;
-        let newTop = y - rootRect.top - offsetY;
-        newLeft = Math.max(0, Math.min(newLeft, rootRect.width - localWrapper.offsetWidth));
-        newTop = Math.max(0, Math.min(newTop, rootRect.height - localWrapper.offsetHeight));
-        localWrapper.style.left = newLeft + 'px';
-        localWrapper.style.top = newTop + 'px';
-        localWrapper.style.right = 'auto';
-    }
+  if (event.data && event.data.type === "bnb_open_call" && event.data.url) {
+    callFrame.src = event.data.url;
+    switchBtn.style.display = "block";
+    showCallView();
+    ensureSwitchButtonVisible();
+  }
+});
 
-    function endDrag() {
-        dragging = false;
-        localWrapper.style.cursor = 'grab';
-    }
+// call.html (chargé dans #call-frame, même origine que cette page) signale
+// la fin de l'appel — qu'il ait été raccroché ici, refusé, ou terminé par
+// l'autre personne. On revient alors automatiquement au chat et on masque
+// le bouton de bascule, qui n'aurait plus aucun appel à afficher.
+window.addEventListener("message", function (event) {
+  if (event.data && event.data.type === "bnb_call_ended") {
+    markCallEndedInSupabase(callFrame.getAttribute("src"));
+    showChatView();
+    switchBtn.style.display = "none";
+    callFrame.src = "";
+  }
+});
 
-    localWrapper.addEventListener('mousedown', (e) => startDrag(e.clientX, e.clientY));
-    document.addEventListener('mousemove', (e) => doDrag(e.clientX, e.clientY));
-    document.addEventListener('mouseup', endDrag);
-
-    localWrapper.addEventListener('touchstart', (e) => {
-        const t = e.touches[0];
-        startDrag(t.clientX, t.clientY);
-    }, {passive: true});
-    document.addEventListener('touchmove', (e) => {
-        const t = e.touches[0];
-        doDrag(t.clientX, t.clientY);
-    }, {passive: true});
-    document.addEventListener('touchend', endDrag);
-})();
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("service-worker.js").catch(function (e) {
+    alert("⚠️ Échec de l'enregistrement du service worker : " + e.message);
+  });
+}
 </script>
 
 </body>
