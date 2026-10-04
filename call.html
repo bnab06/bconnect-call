@@ -121,6 +121,9 @@
     // pour qu'elle masque automatiquement le bouton de bascule. Sans effet
     // si cette page est ouverte seule dans un onglet classique (il n'y a
     // alors personne pour écouter ce message).
+    // ⚠️ La coquille ferme ce cadre dès qu'elle reçoit ce message : il ne
+    // faut donc l'envoyer qu'APRÈS avoir enregistré la fin d'appel (voir
+    // notifyCallEnded), sinon la requête en cours est interrompue.
     function notifyParentCallEnded() {
         try {
             window.parent.postMessage({ type: "bnb_call_ended" }, "*");
@@ -128,34 +131,61 @@
     }
 
     let callAlreadyEnded = false;
-    async function notifyCallEnded() {
+    let endPromise = null;
+
+    // Enregistre la fin d'appel dans Supabase, puis seulement ensuite
+    // prévient la page parente. Appelable plusieurs fois (déconnexion LiveKit
+    // + bouton raccrocher) : toutes les invocations partagent la même requête.
+    function notifyCallEnded() {
+        if (endPromise) { return endPromise; }
+
         if (callAlreadyEnded || !callId || !sbUrl || !sbKey || !sbToken) {
             log("⚠️ Notification impossible : paramètre manquant (callId=" + callId + ", sbUrl=" + (sbUrl ? "ok" : "manquant") + ", sbKey=" + (sbKey ? "ok" : "manquant") + ", sbToken=" + (sbToken ? "ok" : "manquant") + ")");
             notifyParentCallEnded();
-            return;
+            endPromise = Promise.resolve();
+            return endPromise;
         }
+
         callAlreadyEnded = true;
-        notifyParentCallEnded();
-        try {
-            const resp = await fetch(`${sbUrl}/rest/v1/calls?id=eq.${callId}`, {
-                method: 'PATCH',
-                headers: {
-                    'apikey': sbKey,
-                    'Authorization': `Bearer ${sbToken}`,
-                    'Content-Type': 'application/json',
-                    'Prefer': 'return=minimal',
-                },
-                body: JSON.stringify({ status: 'ended', ended_at: new Date().toISOString() }),
-            });
-            if (resp.ok) {
-                console.log("📤 Statut 'terminé' confirmé par le serveur (code " + resp.status + ").");
-            } else {
-                const errText = await resp.text();
-                log("❌ Le serveur a REJETÉ la mise à jour (code " + resp.status + "): " + errText);
+        endPromise = (async function () {
+            try {
+                const controller = new AbortController();
+                const timer = setTimeout(function () { controller.abort(); }, 4000);
+                const resp = await fetch(`${sbUrl}/rest/v1/calls?id=eq.${callId}`, {
+                    method: 'PATCH',
+                    headers: {
+                        'apikey': sbKey,
+                        'Authorization': `Bearer ${sbToken}`,
+                        'Content-Type': 'application/json',
+                        // return=representation : permet de vérifier qu'une ligne a
+                        // réellement été modifiée (sinon une règle de sécurité peut
+                        // refuser la modification sans aucune erreur).
+                        'Prefer': 'return=representation',
+                    },
+                    body: JSON.stringify({ status: 'ended', ended_at: new Date().toISOString() }),
+                    signal: controller.signal,
+                });
+                clearTimeout(timer);
+                if (resp.ok) {
+                    let rows = [];
+                    try { rows = await resp.json(); } catch (e) {}
+                    if (Array.isArray(rows) && rows.length > 0) {
+                        console.log("📤 Statut 'terminé' confirmé par le serveur (code " + resp.status + ").");
+                    } else {
+                        log("❌ Aucune ligne modifiée : règle de sécurité (RLS) de la table calls, ou appel introuvable.");
+                        statusEl.innerText += " (⚠️ fin d'appel non enregistrée : droits)";
+                    }
+                } else {
+                    const errText = await resp.text();
+                    log("❌ Le serveur a REJETÉ la mise à jour (code " + resp.status + "): " + errText);
+                    statusEl.innerText += " (⚠️ fin d'appel non enregistrée : code " + resp.status + ")";
+                }
+            } catch (e) {
+                log("⚠️ Impossible de notifier l'app principale : " + e.message);
             }
-        } catch (e) {
-            log("⚠️ Impossible de notifier l'app principale : " + e.message);
-        }
+            notifyParentCallEnded();
+        })();
+        return endPromise;
     }
 
     let callAlreadyMarkedOngoing = false;
@@ -195,6 +225,10 @@
                 if (remoteStatus === 'declined' || remoteStatus === 'ended') {
                     console.log("📥 Statut distant détecté : " + remoteStatus + ". Déconnexion...");
                     clearInterval(statusCheckInterval);
+                    // Le statut est déjà enregistré côté serveur : inutile de le réécrire
+                    // (et on ne doit surtout pas écraser "refusé" par "terminé").
+                    callAlreadyEnded = true;
+                    endPromise = Promise.resolve();
                     try {
                         await room.localParticipant.setCameraEnabled(false);
                         await room.localParticipant.setMicrophoneEnabled(false);
@@ -203,7 +237,6 @@
                     statusEl.innerText = remoteStatus === 'declined'
                         ? peerName + " a refusé l'appel."
                         : "Appel avec " + peerName + " terminé. Tu peux fermer cet onglet.";
-                    callAlreadyEnded = true;
                     notifyParentCallEnded();
                 }
             } catch (e) {
