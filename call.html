@@ -386,6 +386,10 @@
     } catch (err) {
         log("❌ ERREUR de connexion à la room: " + err.message);
         statusEl.innerText = "❌ Erreur de connexion : " + err.message;
+        // Ne pas laisser la personne bloquée sur cette page : après un court
+        // instant pour lire le message, on enregistre la fin d'appel puis on
+        // revient automatiquement au chat.
+        setTimeout(function () { notifyCallEnded(); }, 3500);
     }
 
     let micOn = true;
