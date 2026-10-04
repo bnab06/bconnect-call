@@ -350,6 +350,40 @@ function ensureSwitchButtonVisible() {
 }
 window.addEventListener("resize", ensureSwitchButtonVisible);
 
+function markCallEndedInSupabase(callUrl) {
+  // Filet de sécurité : quand la page d'appel signale la fin de l'appel, on
+  // s'assure nous-mêmes que la base le sait (passage de "sonne" ou "en cours"
+  // à "terminé"), pour que l'appli de chat n'affiche plus de boutons
+  // "Rejoindre / Terminer l'appel". Sans effet si c'est déjà fait (la
+  // condition sur le statut évite d'écraser "refusé" ou "terminé").
+  try {
+    if (!callUrl) return;
+    const u = new URL(callUrl);
+    const callId = u.searchParams.get("call_id");
+    const sbUrl = u.searchParams.get("sb_url") || SUPABASE_URL;
+    const sbKey = u.searchParams.get("sb_key") || SUPABASE_ANON_KEY;
+    if (!callId) return;
+    const tokens = [u.searchParams.get("sb_token"), currentAccessToken].filter(function (t, i, arr) {
+      return t && arr.indexOf(t) === i;
+    });
+    (function tryNext(i) {
+      if (i >= tokens.length) return;
+      fetch(sbUrl + "/rest/v1/calls?id=eq." + encodeURIComponent(callId) + "&status=in.(ringing,ongoing)", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": sbKey,
+          "Authorization": "Bearer " + tokens[i],
+          "Prefer": "return=minimal",
+        },
+        body: JSON.stringify({ status: "ended", ended_at: new Date().toISOString() }),
+      }).then(function (resp) {
+        if (!resp.ok) { tryNext(i + 1); }
+      }).catch(function () { tryNext(i + 1); });
+    })(0);
+  } catch (e) {}
+}
+
 function toggleCallChatView() {
   if (showingCall) {
     showChatView();
@@ -491,6 +525,7 @@ window.addEventListener("message", function (event) {
 // le bouton de bascule, qui n'aurait plus aucun appel à afficher.
 window.addEventListener("message", function (event) {
   if (event.data && event.data.type === "bnb_call_ended") {
+    markCallEndedInSupabase(callFrame.getAttribute("src"));
     showChatView();
     switchBtn.style.display = "none";
     callFrame.src = "";
