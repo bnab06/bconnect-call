@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>BnB Connect — Message vidéo</title>
+<style>
+  html, body { margin:0; padding:0; height:100%; background:#1E1E2E; font-family:-apple-system,sans-serif; color:#fff; }
+  #root { position:relative; width:100vw; height:100vh; display:flex; flex-direction:column; box-sizing:border-box; padding:16px; }
+  @supports (-webkit-touch-callout: none) { #root { padding-top:max(60px, calc(env(safe-area-inset-top, 0px) + 20px)); } }
+  #title { font-size:15px; font-weight:700; text-align:center; margin-bottom:10px; }
+  #v { flex:1; min-height:0; width:100%; background:#111; border-radius:16px; object-fit:cover; }
+  #st { text-align:center; font-size:14px; margin:12px 4px; min-height:20px; }
+  #row { display:flex; justify-content:center; flex-wrap:wrap; gap:10px; padding-bottom:16px; }
+  button { background:#6C5CE7; color:#fff; border:none; border-radius:14px; padding:13px 20px; font-weight:700; font-size:15px; }
+  #stop, #cancel { background:#E74C3C; }
+  #redo { background:#7F8C8D; }
+</style>
+</head>
+<body>
+<div id="root">
+  <div id="title">🎥 Message vidéo</div>
+  <video id="v" playsinline muted></video>
+  <div id="st"></div>
+  <div id="row">
+    <button id="start">🎥 Démarrer</button>
+    <button id="stop" style="display:none">⏹ Arrêter</button>
+    <button id="send" style="display:none">✅ Envoyer</button>
+    <button id="redo" style="display:none">🔄 Refaire</button>
+    <button id="cancel">✕ Fermer</button>
+  </div>
+</div>
+<script>
+(function () {
+  var q = new URLSearchParams(window.location.search);
+  var CFG = {
+    url: q.get('sb_url'), key: q.get('sb_key'), token: q.get('sb_token'),
+    conv: q.get('conv'), sender: q.get('sender'), peer: q.get('peer_name') || ''
+  };
+  var MAX = 90;  // durée maximale, en secondes
+  var $ = function (i) { return document.getElementById(i); };
+  var v = $('v'), st = $('st');
+  var stream = null, rec = null, chunks = [], blob = null, ticker = null, secs = 0;
+  if (CFG.peer) { $('title').textContent = '🎥 Message vidéo pour ' + CFG.peer; }
+
+  // Ferme cette page : dans la coquille (appli installée) le cadre se ferme
+  // et on revient au chat ; dans un onglet normal, on invite à le fermer.
+  function closePage() {
+    try { window.parent.postMessage({ type: 'bnb_call_ended' }, '*'); } catch (e) {}
+    if (window.parent === window) { setSt("Tu peux fermer cet onglet."); }
+  }
+
+  function show(ids) {
+    ['start', 'stop', 'send', 'redo'].forEach(function (id) {
+      $(id).style.display = ids.indexOf(id) >= 0 ? 'inline-block' : 'none';
+    });
+  }
+  function setSt(t, err) { st.textContent = t; st.style.color = err ? '#FF7675' : '#ddd'; }
+  function stopStream() {
+    if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
+  }
+  function pickMime() {
+    var c = ['video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+    for (var i = 0; i < c.length; i++) {
+      if (window.MediaRecorder && MediaRecorder.isTypeSupported(c[i])) { return c[i]; }
+    }
+    return '';
+  }
+  function errText(e) {
+    var n = (e && e.name) || '';
+    if (n === 'NotAllowedError' || n === 'SecurityError') { return "Caméra/micro refusés. Autorise-les pour ce site dans les réglages du navigateur, puis réessaie."; }
+    if (n === 'NotFoundError') { return "Aucune caméra ou aucun micro trouvé."; }
+    if (n === 'NotReadableError' || n === 'AbortError') { return "Caméra déjà utilisée par une autre appli ou un autre onglet."; }
+    return "Caméra indisponible : " + ((e && e.message) || n);
+  }
+  function reset() {
+    stopStream();
+    blob = null; chunks = [];
+    if (v.src) { try { URL.revokeObjectURL(v.src); } catch (e) {} }
+    v.removeAttribute('src'); v.srcObject = null; v.controls = false; v.muted = true; v.style.transform = 'none';
+    setSt("Appuie sur « Démarrer » (90 s maximum).");
+    show(['start']);
+  }
+
+  if (!CFG.url || !CFG.key || !CFG.token || !CFG.conv || !CFG.sender) {
+    setSt("❌ Lien invalide (paramètres manquants).", true); show([]);
+  } else { reset(); }
+
+  $('start').onclick = async function () {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+      setSt("L'enregistrement vidéo n'est pas disponible sur ce navigateur.", true); return;
+    }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true });
+    } catch (e) { setSt(errText(e), true); return; }
+    v.srcObject = stream; v.muted = true; v.controls = false; v.style.transform = 'scaleX(-1)';
+    try { await v.play(); } catch (e) {}
+    var mt = pickMime();
+    chunks = [];
+    try { rec = new MediaRecorder(stream, mt ? { mimeType: mt } : undefined); }
+    catch (e) { setSt("Enregistrement impossible : " + e.message, true); stopStream(); return; }
+    rec.ondataavailable = function (e) { if (e.data && e.data.size) { chunks.push(e.data); } };
+    rec.onstop = function () {
+      clearInterval(ticker); stopStream();
+      blob = new Blob(chunks, { type: rec.mimeType || mt || 'video/webm' });
+      v.srcObject = null; v.src = URL.createObjectURL(blob);
+      v.style.transform = 'none'; v.muted = false; v.controls = true;
+      setSt("Vérifie ta vidéo (" + secs + " s), puis envoie-la.");
+      show(['send', 'redo']);
+    };
+    secs = 0; rec.start();
+    setSt("🔴 Enregistrement… 0 s"); show(['stop']);
+    ticker = setInterval(function () {
+      secs++; setSt("🔴 Enregistrement… " + secs + " s");
+      if (secs >= MAX) { $('stop').click(); }
+    }, 1000);
+  };
+
+  $('stop').onclick = function () { if (rec && rec.state !== 'inactive') { rec.stop(); } };
+  $('redo').onclick = reset;
+  $('cancel').onclick = function () {
+    try { if (rec && rec.state !== 'inactive') { rec.onstop = null; rec.stop(); } } catch (e) {}
+    clearInterval(ticker); stopStream(); closePage();
+  };
+
+  $('send').onclick = async function () {
+    if (!blob) { return; }
+    show([]); setSt("Envoi en cours…");
+    var type = (blob.type || 'video/webm').split(';')[0];
+    var ext = type.indexOf('mp4') >= 0 ? 'mp4' : 'webm';
+    var id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now() + '-' + Math.random().toString(16).slice(2));
+    var path = CFG.conv + '/video/' + id + '.' + ext;
+    var auth = { apikey: CFG.key, Authorization: 'Bearer ' + CFG.token };
+    try {
+      var fd = new FormData();
+      fd.append('cacheControl', '3600');
+      fd.append('', new File([blob], id + '.' + ext, { type: type }));
+      var r1 = await fetch(CFG.url + '/storage/v1/object/media/' + path, { method: 'POST', headers: auth, body: fd });
+      if (!r1.ok) { throw new Error("fichier refusé (code " + r1.status + ") " + (await r1.text()).slice(0, 120)); }
+      var mediaUrl = CFG.url + '/storage/v1/object/public/media/' + path;
+      var r2 = await fetch(CFG.url + '/rest/v1/messages', {
+        method: 'POST',
+        headers: { apikey: CFG.key, Authorization: 'Bearer ' + CFG.token, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+        body: JSON.stringify({ conversation_id: CFG.conv, sender_id: CFG.sender, content: null, message_type: 'video', media_url: mediaUrl, media_duration: null })
+      });
+      if (!r2.ok) { throw new Error("message refusé (code " + r2.status + ") " + (await r2.text()).slice(0, 120)); }
+      try {
+        await fetch(CFG.url + '/rest/v1/conversation_participants?conversation_id=eq.' + CFG.conv, {
+          method: 'PATCH',
+          headers: { apikey: CFG.key, Authorization: 'Bearer ' + CFG.token, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+          body: JSON.stringify({ is_deleted: false })
+        });
+      } catch (e) {}
+      blob = null;
+      setSt("✅ Vidéo envoyée !");
+      setTimeout(closePage, 1200);
+    } catch (e) {
+      setSt("⚠️ Échec de l'envoi : " + e.message, true);
+      show(['send', 'redo']);
+    }
+  };
+})();
+</script>
+</body>
+</html>
