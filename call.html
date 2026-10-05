@@ -5,84 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>BnB Connect — Appel</title>
 <style>
-  html, body {
-    margin: 0;
-    padding: 0;
-    background: #1E1E2E;
-    font-family: -apple-system, sans-serif;
-    height: 100%;
-  }
-  #bnb-call-root {
-    position: relative;
-    width: 100vw;
-    height: 100vh;
-    background: #1E1E2E;
-    overflow: hidden;
-  }
-  #bnb-remote-video {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    background: #111;
-  }
-  #bnb-local-wrapper {
-    position: absolute;
-    top: 24px;
-    right: 24px;
-    width: 100px;
-    height: 130px;
-    border-radius: 14px;
-    overflow: hidden;
-    border: 2px solid white;
-    cursor: grab;
-    touch-action: none;
-    background: #333;
-  }
-  #bnb-local-video {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-  #bnb-status {
-    position: absolute;
-    top: 24px;
-    left: 24px;
-    color: white;
-    background: rgba(0,0,0,0.55);
-    padding: 8px 16px;
-    border-radius: 20px;
-    font-size: 13px;
-    max-width: 55%;
-  }
-  /* iPhone : le haut de l'écran est occupé par l'encoche / la barre d'état,
-     on décale donc le message et la vignette caméra vers le bas. */
+  html, body { margin:0; padding:0; background:#1E1E2E; font-family:-apple-system,sans-serif; height:100%; }
+  #bnb-call-root { position:relative; width:100vw; height:100vh; background:#1E1E2E; overflow:hidden; }
+  #bnb-remote-video { width:100%; height:100%; object-fit:cover; background:#111; }
+  #bnb-local-wrapper { position:absolute; top:24px; right:24px; width:100px; height:130px; border-radius:14px; overflow:hidden; border:2px solid white; cursor:grab; touch-action:none; background:#333; }
+  #bnb-local-video { width:100%; height:100%; object-fit:cover; }
+  #bnb-status { position:absolute; top:24px; left:24px; color:white; background:rgba(0,0,0,0.55); padding:8px 16px; border-radius:20px; font-size:13px; max-width:55%; }
   @supports (-webkit-touch-callout: none) {
-    #bnb-status,
-    #bnb-local-wrapper {
-      top: max(66px, calc(env(safe-area-inset-top, 0px) + 24px));
-    }
+    #bnb-status, #bnb-local-wrapper { top:max(66px, calc(env(safe-area-inset-top, 0px) + 24px)); }
   }
-  #bnb-controls {
-    position: absolute;
-    bottom: 16px;
-    left: 0;
-    right: 0;
-    display: flex;
-    justify-content: center;
-    gap: 16px;
-  }
-  .bnb-btn {
-    width: 50px;
-    height: 50px;
-    border-radius: 50%;
-    border: none;
-    background: #6C5CE7;
-    color: white;
-    font-size: 20px;
-  }
-  .bnb-btn.hangup {
-    background: #E74C3C;
-  }
+  #bnb-cam-help { position:absolute; left:16px; right:16px; bottom:84px; display:none; background:rgba(231,76,60,0.92); color:white; padding:12px 14px; border-radius:14px; font-size:13px; line-height:1.4; text-align:center; z-index:5; }
+  #bnb-cam-help button { margin-top:8px; background:white; color:#E74C3C; border:none; border-radius:10px; padding:8px 16px; font-weight:700; font-size:13px; }
+  #bnb-controls { position:absolute; bottom:16px; left:0; right:0; display:flex; justify-content:center; gap:16px; }
+  .bnb-btn { width:50px; height:50px; border-radius:50%; border:none; background:#6C5CE7; color:white; font-size:20px; }
+  .bnb-btn.hangup { background:#E74C3C; }
 </style>
 </head>
 <body>
@@ -97,6 +33,11 @@
 
   <div id="bnb-status">Connexion...</div>
 
+  <div id="bnb-cam-help">
+    <div id="bnb-cam-help-text"></div>
+    <button id="bnb-cam-retry">📷 Réessayer la caméra</button>
+  </div>
+
   <div id="bnb-controls">
     <button class="bnb-btn" id="bnb-toggle-mic">🎤</button>
     <button class="bnb-btn" id="bnb-toggle-cam">📷</button>
@@ -107,10 +48,8 @@
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.0/dist/livekit-client.umd.min.js"></script>
 <script>
 (async function () {
-    function log(msg) {
-        console.log(msg);
-    }
-    window.onerror = function (message, source, lineno, colno, error) {
+    function log(msg) { console.log(msg); }
+    window.onerror = function (message, source, lineno) {
         log("❌ ERREUR JS: " + message + " (ligne " + lineno + ")");
     };
 
@@ -124,33 +63,19 @@
     const sbToken = params.get('sb_token');
     const peerName = params.get('peer_name') || "L'autre personne";
 
-    // iPhone : une catégorie audio "lecture seule" empêche d'utiliser le micro
-    // ("catégorie incompatible avec la capture audio"). On demande explicitement
-    // une catégorie qui autorise lecture ET enregistrement.
-    try {
-        if (navigator.audioSession) { navigator.audioSession.type = "play-and-record"; }
-    } catch (e) {}
+    // iPhone : catégorie audio autorisant lecture ET capture.
+    try { if (navigator.audioSession) { navigator.audioSession.type = "play-and-record"; } } catch (e) {}
 
-    // Signale à la page parente (la coquille bconnect-call, si cette page
-    // est affichée dans son second cadre d'appel) que l'appel est terminé,
-    // pour qu'elle masque automatiquement le bouton de bascule. Sans effet
-    // si cette page est ouverte seule dans un onglet classique (il n'y a
-    // alors personne pour écouter ce message).
-    // ⚠️ La coquille ferme ce cadre dès qu'elle reçoit ce message : il ne
-    // faut donc l'envoyer qu'APRÈS avoir enregistré la fin d'appel (voir
-    // notifyCallEnded), sinon la requête en cours est interrompue.
+    // Prévient la coquille (bconnect-call) que l'appel est terminé.
+    // ⚠️ À n'envoyer qu'APRÈS l'enregistrement de la fin d'appel (voir notifyCallEnded),
+    // car la coquille ferme ce cadre dès réception.
     function notifyParentCallEnded() {
-        try {
-            window.parent.postMessage({ type: "bnb_call_ended" }, "*");
-        } catch (e) {}
+        try { window.parent.postMessage({ type: "bnb_call_ended" }, "*"); } catch (e) {}
     }
 
     let callAlreadyEnded = false;
     let endPromise = null;
 
-    // Enregistre la fin d'appel dans Supabase, puis seulement ensuite
-    // prévient la page parente. Appelable plusieurs fois (déconnexion LiveKit
-    // + bouton raccrocher) : toutes les invocations partagent la même requête.
     function notifyCallEnded() {
         if (endPromise) { return endPromise; }
 
@@ -172,9 +97,6 @@
                         'apikey': sbKey,
                         'Authorization': `Bearer ${sbToken}`,
                         'Content-Type': 'application/json',
-                        // return=representation : permet de vérifier qu'une ligne a
-                        // réellement été modifiée (sinon une règle de sécurité peut
-                        // refuser la modification sans aucune erreur).
                         'Prefer': 'return=representation',
                     },
                     body: JSON.stringify({ status: 'ended', ended_at: new Date().toISOString() }),
@@ -224,24 +146,23 @@
         }
     }
 
-    // Surveille le statut de l'appel côté app principale : si l'autre
-    // personne refuse ou raccroche depuis l'app (avant même d'avoir
-    // rejoint cette page), on se déconnecte proprement au lieu de rester
-    // bloqué en "attente" indéfiniment.
+    // Surveille le statut côté app : si l'autre refuse ou raccroche, on se déconnecte proprement.
     let statusCheckInterval = null;
     if (callId && sbUrl && sbKey && sbToken) {
         statusCheckInterval = setInterval(async () => {
             try {
-                const resp = await fetch(`${sbUrl}/rest/v1/calls?id=eq.${callId}&select=status`, {
-                    headers: { 'apikey': sbKey, 'Authorization': `Bearer ${sbToken}` },
-                });
+                const pollHeaders = { 'apikey': sbKey, 'Authorization': `Bearer ${sbToken}` };
+                let resp = await fetch(`${sbUrl}/rest/v1/calls?id=eq.${callId}&select=status,decline_reason`, { headers: pollHeaders });
+                if (!resp.ok) {
+                    // Colonne decline_reason pas encore créée (script SQL 21) : lecture du statut seul.
+                    resp = await fetch(`${sbUrl}/rest/v1/calls?id=eq.${callId}&select=status`, { headers: pollHeaders });
+                }
                 const rows = await resp.json();
                 const remoteStatus = rows && rows[0] ? rows[0].status : null;
+                const declineReason = rows && rows[0] ? rows[0].decline_reason : null;
                 if (remoteStatus === 'declined' || remoteStatus === 'ended') {
                     console.log("📥 Statut distant détecté : " + remoteStatus + ". Déconnexion...");
                     clearInterval(statusCheckInterval);
-                    // Le statut est déjà enregistré côté serveur : inutile de le réécrire
-                    // (et on ne doit surtout pas écraser "refusé" par "terminé").
                     callAlreadyEnded = true;
                     endPromise = Promise.resolve();
                     try {
@@ -249,14 +170,13 @@
                         await room.localParticipant.setMicrophoneEnabled(false);
                     } catch (e) {}
                     room.disconnect();
+                    camHelp.style.display = 'none';
                     statusEl.innerText = remoteStatus === 'declined'
-                        ? peerName + " a refusé l'appel."
+                        ? (declineReason ? "💬 " + peerName + " : " + declineReason : peerName + " a refusé l'appel.")
                         : "Appel avec " + peerName + " terminé. Tu peux fermer cet onglet.";
                     notifyParentCallEnded();
                 }
-            } catch (e) {
-                // Erreur réseau ponctuelle, sans gravité : on réessaiera au prochain cycle.
-            }
+            } catch (e) {}
         }, 3000);
     }
 
@@ -273,6 +193,8 @@
     const remoteAudioEl = document.getElementById('bnb-remote-audio');
     const localVideoEl = document.getElementById('bnb-local-video');
     const localWrapper = document.getElementById('bnb-local-wrapper');
+    const camHelp = document.getElementById('bnb-cam-help');
+    const camHelpText = document.getElementById('bnb-cam-help-text');
 
     if (!showVideo) {
         localWrapper.style.display = 'none';
@@ -285,11 +207,64 @@
         return;
     }
 
-    // Écoute de TOUS les événements pertinents de la room, avant même
-    // de se connecter, pour ne rien manquer.
-    room.on(LK.RoomEvent.ConnectionStateChanged, (state) => {
-        log("État de connexion: " + state);
-    });
+    // ---- Caméra -------------------------------------------------------
+    // Message d'erreur persistant (le texte de statut est réécrit par les
+    // événements d'appel, l'erreur de caméra s'y perdait) + bouton Réessayer.
+    function camErrorText(e) {
+        const n = (e && e.name) || '';
+        if (n === 'NotAllowedError' || n === 'SecurityError') {
+            return "Accès à la caméra refusé. Autorise la caméra pour ce site (cadenas dans la barre d'adresse ; Safari : Réglages > Sites web > Caméra), puis réessaie.";
+        }
+        if (n === 'NotFoundError' || n === 'OverconstrainedError') {
+            return "Aucune caméra trouvée sur cet appareil.";
+        }
+        if (n === 'NotReadableError' || n === 'AbortError') {
+            return "La caméra est déjà utilisée par une autre appli ou un autre onglet. Ferme-les puis réessaie.";
+        }
+        return "Caméra indisponible : " + ((e && e.message) ? e.message : (n || "erreur inconnue"));
+    }
+
+    function showCamError(text) {
+        camHelpText.innerText = text;
+        camHelp.style.display = 'block';
+    }
+
+    function attachLocalCamera() {
+        const pub = room.localParticipant.getTrackPublication(LK.Track.Source.Camera);
+        if (pub && pub.track) {
+            pub.track.attach(localVideoEl);
+            const p = localVideoEl.play();
+            if (p && p.catch) { p.catch(function () {}); }
+        }
+    }
+
+    let camOn = true;
+    async function startCamera() {
+        camHelp.style.display = 'none';
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            showCamError("Ce navigateur n'autorise pas la caméra ici (page non sécurisée ou cadre sans droit caméra).");
+            return false;
+        }
+        try {
+            // Test direct, avec l'erreur exacte du navigateur si ça échoue.
+            const test = await navigator.mediaDevices.getUserMedia({ video: true });
+            test.getTracks().forEach(function (t) { t.stop(); });
+            await room.localParticipant.setCameraEnabled(true);
+            attachLocalCamera();
+            camOn = true;
+            document.getElementById('bnb-toggle-cam').style.opacity = "1";
+            log("✅ Caméra activée et publiée.");
+            return true;
+        } catch (e) {
+            log("❌ ERREUR caméra: " + (e && e.name) + " " + (e && e.message));
+            showCamError(camErrorText(e));
+            return false;
+        }
+    }
+    document.getElementById('bnb-cam-retry').onclick = startCamera;
+
+    // ---- Événements de la room ------------------------------------------
+    room.on(LK.RoomEvent.ConnectionStateChanged, (state) => { log("État de connexion: " + state); });
     room.on(LK.RoomEvent.ParticipantConnected, (p) => {
         log("👤 Participant connecté: " + p.identity);
         statusEl.innerText = "Connecté avec " + peerName + "...";
@@ -306,11 +281,8 @@
         log("✅ Track REÇUE de " + participant.identity + " (" + track.kind + ")");
         statusEl.innerText = "En cours d'appel avec " + peerName;
         notifyCallOngoing();
-        if (track.kind === 'video') {
-            track.attach(remoteVideoEl);
-        } else if (track.kind === 'audio') {
-            track.attach(remoteAudioEl);
-        }
+        if (track.kind === 'video') { track.attach(remoteVideoEl); }
+        else if (track.kind === 'audio') { track.attach(remoteAudioEl); }
     });
     room.on(LK.RoomEvent.TrackSubscriptionFailed, (trackSid, participant) => {
         log("❌ ÉCHEC subscription track " + trackSid + " de " + participant.identity);
@@ -320,6 +292,7 @@
     });
     room.on(LK.RoomEvent.LocalTrackPublished, (publication) => {
         log("📤 MA track publiée: " + publication.kind);
+        if (publication.source === LK.Track.Source.Camera) { attachLocalCamera(); }
     });
     room.on(LK.RoomEvent.MediaDevicesError, (e) => {
         log("⚠️ Erreur périphérique média: " + e.message);
@@ -330,15 +303,12 @@
             await room.localParticipant.setCameraEnabled(false);
             await room.localParticipant.setMicrophoneEnabled(false);
         } catch (e) {}
+        camHelp.style.display = 'none';
         statusEl.innerText = "Appel avec " + peerName + " terminé. Tu peux fermer cet onglet.";
         notifyCallEnded();
     });
-    room.on(LK.RoomEvent.Reconnecting, () => {
-        log("🔄 Reconnexion en cours...");
-    });
-    room.on(LK.RoomEvent.Reconnected, () => {
-        log("✅ Reconnecté.");
-    });
+    room.on(LK.RoomEvent.Reconnecting, () => { log("🔄 Reconnexion en cours..."); });
+    room.on(LK.RoomEvent.Reconnected, () => { log("✅ Reconnecté."); });
 
     try {
         log("Tentative de connexion à la room...");
@@ -356,22 +326,8 @@
             statusEl.innerText = "⚠️ Micro refusé : " + micErr.message;
         }
 
-        if (showVideo) {
-            try {
-                await room.localParticipant.setCameraEnabled(true);
-                log("✅ Caméra activée et publiée.");
-                const camPub = room.localParticipant.getTrackPublication(LK.Track.Source.Camera);
-                if (camPub && camPub.track) {
-                    camPub.track.attach(localVideoEl);
-                }
-            } catch (camErr) {
-                log("❌ ERREUR caméra: " + camErr.message);
-                statusEl.innerText = "⚠️ Caméra refusée : " + camErr.message;
-            }
-        }
+        if (showVideo) { await startCamera(); }
 
-        // Vérifie s'il y avait déjà des participants/tracks au moment
-        // de notre connexion (utile si l'autre est arrivé avant nous).
         if (room.remoteParticipants.size > 0) {
             statusEl.innerText = "Connecté avec " + peerName + "...";
             notifyCallOngoing();
@@ -386,9 +342,6 @@
     } catch (err) {
         log("❌ ERREUR de connexion à la room: " + err.message);
         statusEl.innerText = "❌ Erreur de connexion : " + err.message;
-        // Ne pas laisser la personne bloquée sur cette page : après un court
-        // instant pour lire le message, on enregistre la fin d'appel puis on
-        // revient automatiquement au chat.
         setTimeout(function () { notifyCallEnded(); }, 3500);
     }
 
@@ -400,10 +353,13 @@
         log("Micro " + (micOn ? "réactivé" : "coupé") + " manuellement.");
     };
 
-    let camOn = true;
     document.getElementById('bnb-toggle-cam').onclick = async function () {
+        // Si la caméra n'a jamais démarré, ce bouton sert à la relancer.
+        const pub = room.localParticipant.getTrackPublication(LK.Track.Source.Camera);
+        if (!pub || !pub.track) { await startCamera(); return; }
         camOn = !camOn;
         await room.localParticipant.setCameraEnabled(camOn);
+        if (camOn) { attachLocalCamera(); }
         this.style.opacity = camOn ? "1" : "0.5";
         log("Caméra " + (camOn ? "réactivée" : "coupée") + " manuellement.");
     };
@@ -418,6 +374,7 @@
             log("⚠️ Erreur en coupant caméra/micro : " + e.message);
         }
         room.disconnect();
+        camHelp.style.display = 'none';
         statusEl.innerText = "Appel avec " + peerName + " terminé. Tu peux fermer cet onglet.";
         notifyCallEnded();
     };
@@ -433,7 +390,6 @@
         offsetY = y - rect.top;
         localWrapper.style.cursor = 'grabbing';
     }
-
     function doDrag(x, y) {
         if (!dragging) return;
         const rootRect = document.getElementById('bnb-call-root').getBoundingClientRect();
@@ -445,24 +401,13 @@
         localWrapper.style.top = newTop + 'px';
         localWrapper.style.right = 'auto';
     }
-
-    function endDrag() {
-        dragging = false;
-        localWrapper.style.cursor = 'grab';
-    }
+    function endDrag() { dragging = false; localWrapper.style.cursor = 'grab'; }
 
     localWrapper.addEventListener('mousedown', (e) => startDrag(e.clientX, e.clientY));
     document.addEventListener('mousemove', (e) => doDrag(e.clientX, e.clientY));
     document.addEventListener('mouseup', endDrag);
-
-    localWrapper.addEventListener('touchstart', (e) => {
-        const t = e.touches[0];
-        startDrag(t.clientX, t.clientY);
-    }, {passive: true});
-    document.addEventListener('touchmove', (e) => {
-        const t = e.touches[0];
-        doDrag(t.clientX, t.clientY);
-    }, {passive: true});
+    localWrapper.addEventListener('touchstart', (e) => { const t = e.touches[0]; startDrag(t.clientX, t.clientY); }, {passive: true});
+    document.addEventListener('touchmove', (e) => { const t = e.touches[0]; doDrag(t.clientX, t.clientY); }, {passive: true});
     document.addEventListener('touchend', endDrag);
 })();
 </script>
