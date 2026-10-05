@@ -16,6 +16,7 @@
   }
   #bnb-cam-help { position:absolute; left:16px; right:16px; bottom:84px; display:none; background:rgba(231,76,60,0.92); color:white; padding:12px 14px; border-radius:14px; font-size:13px; line-height:1.4; text-align:center; z-index:5; }
   #bnb-cam-help button { margin-top:8px; background:white; color:#E74C3C; border:none; border-radius:10px; padding:8px 16px; font-weight:700; font-size:13px; }
+  #bnb-status.big { left:24px; right:24px; top:38%; max-width:none; text-align:center; font-size:20px; line-height:1.4; padding:18px 20px; border-radius:18px; box-sizing:border-box; }
   #bnb-controls { position:absolute; bottom:16px; left:0; right:0; display:flex; justify-content:center; gap:16px; }
   .bnb-btn { width:50px; height:50px; border-radius:50%; border:none; background:#6C5CE7; color:white; font-size:20px; }
   .bnb-btn.hangup { background:#E74C3C; }
@@ -174,7 +175,13 @@
                     statusEl.innerText = remoteStatus === 'declined'
                         ? (declineReason ? "💬 " + peerName + " : " + declineReason : peerName + " a refusé l'appel.")
                         : "Appel avec " + peerName + " terminé. Tu peux fermer cet onglet.";
-                    notifyParentCallEnded();
+                    if (remoteStatus === 'declined') {
+                        // Message agrandi, et on laisse le temps de le lire avant de revenir au chat.
+                        statusEl.classList.add('big');
+                        setTimeout(notifyParentCallEnded, 8000);
+                    } else {
+                        notifyParentCallEnded();
+                    }
                 }
             } catch (e) {}
         }, 3000);
