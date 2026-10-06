@@ -49,7 +49,11 @@
   // et on revient au chat ; dans un onglet normal, on invite à le fermer.
   function closePage() {
     try { window.parent.postMessage({ type: 'bnb_call_ended' }, '*'); } catch (e) {}
-    if (window.parent === window) { setSt("Tu peux fermer cet onglet."); }
+    if (window.parent === window) {
+      // Onglet ouvert seul (ordinateur) : on tente de le fermer.
+      try { window.close(); } catch (e) {}
+      setSt("Tu peux fermer cet onglet."); show([]);
+    }
   }
 
   function show(ids) {
@@ -77,7 +81,7 @@
     return "Caméra indisponible : " + ((e && e.message) || n);
   }
   // Allume la caméra choisie (aperçu avant d'enregistrer).
-  async function openCamera() {
+  async function openCameraNow() {
     stopStream();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setSt("Caméra non disponible ici.", true); show(['start']); return false;
@@ -98,7 +102,17 @@
     return true;
   }
 
+  var opening = null, wantPreview = true;
+  function openCamera() {
+    if (!opening) {
+      opening = openCameraNow().then(function (res) { opening = null; return res; },
+                                     function (e) { opening = null; throw e; });
+    }
+    return opening;
+  }
+
   function reset() {
+    wantPreview = true;
     stopStream();
     blob = null; chunks = [];
     if (v.src) { try { URL.revokeObjectURL(v.src); } catch (e) {} }
@@ -110,8 +124,16 @@
 
   $('flip').onclick = async function () {
     facing = facing === 'user' ? 'environment' : 'user';
+    if (opening) { try { await opening; } catch (e) {} }
     await openCamera();
   };
+
+  document.addEventListener('visibilitychange', function () {
+    var idle = !rec || rec.state === 'inactive';
+    if (document.hidden) { if (idle) { stopStream(); } }
+    else if (wantPreview && idle && !stream && !blob) { openCamera(); }
+  });
+  window.addEventListener('pagehide', function () { stopStream(); });
 
   if (!CFG.url || !CFG.key || !CFG.token || !CFG.conv || !CFG.sender) {
     setSt("❌ Lien invalide (paramètres manquants).", true); show([]);
@@ -147,7 +169,7 @@
   $('redo').onclick = reset;
   $('cancel').onclick = function () {
     try { if (rec && rec.state !== 'inactive') { rec.onstop = null; rec.stop(); } } catch (e) {}
-    clearInterval(ticker); stopStream(); closePage();
+    wantPreview = false; clearInterval(ticker); stopStream(); closePage();
   };
 
   $('send').onclick = async function () {
@@ -179,6 +201,7 @@
         });
       } catch (e) {}
       blob = null;
+      wantPreview = false; stopStream();
       setSt("✅ Vidéo envoyée !");
       setTimeout(closePage, 1200);
     } catch (e) {
