@@ -14,7 +14,7 @@
   #row { display:flex; justify-content:center; flex-wrap:wrap; gap:10px; padding-bottom:16px; }
   button { background:#6C5CE7; color:#fff; border:none; border-radius:14px; padding:13px 20px; font-weight:700; font-size:15px; }
   #stop, #cancel { background:#E74C3C; }
-  #redo { background:#7F8C8D; }
+  #redo, #flip { background:#7F8C8D; }
 </style>
 </head>
 <body>
@@ -24,6 +24,7 @@
   <div id="st"></div>
   <div id="row">
     <button id="start">🎥 Démarrer</button>
+    <button id="flip" style="display:none">🔄 Caméra arrière</button>
     <button id="stop" style="display:none">⏹ Arrêter</button>
     <button id="send" style="display:none">✅ Envoyer</button>
     <button id="redo" style="display:none">🔄 Refaire</button>
@@ -41,6 +42,7 @@
   var $ = function (i) { return document.getElementById(i); };
   var v = $('v'), st = $('st');
   var stream = null, rec = null, chunks = [], blob = null, ticker = null, secs = 0;
+  var facing = 'user', canFlip = false;  // caméra avant ('user') ou arrière ('environment')
   if (CFG.peer) { $('title').textContent = '🎥 Message vidéo pour ' + CFG.peer; }
 
   // Ferme cette page : dans la coquille (appli installée) le cadre se ferme
@@ -51,8 +53,9 @@
   }
 
   function show(ids) {
-    ['start', 'stop', 'send', 'redo'].forEach(function (id) {
-      $(id).style.display = ids.indexOf(id) >= 0 ? 'inline-block' : 'none';
+    ['start', 'stop', 'send', 'redo', 'flip'].forEach(function (id) {
+      var on = ids.indexOf(id) >= 0 && (id !== 'flip' || canFlip);
+      $(id).style.display = on ? 'inline-block' : 'none';
     });
   }
   function setSt(t, err) { st.textContent = t; st.style.color = err ? '#FF7675' : '#ddd'; }
@@ -73,6 +76,28 @@
     if (n === 'NotReadableError' || n === 'AbortError') { return "Caméra déjà utilisée par une autre appli ou un autre onglet."; }
     return "Caméra indisponible : " + ((e && e.message) || n);
   }
+  // Allume la caméra choisie (aperçu avant d'enregistrer).
+  async function openCamera() {
+    stopStream();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setSt("Caméra non disponible ici.", true); show(['start']); return false;
+    }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: facing } }, audio: true });
+    } catch (e) { setSt(errText(e), true); show(['start']); return false; }
+    v.srcObject = stream; v.muted = true; v.controls = false;
+    v.style.transform = facing === 'user' ? 'scaleX(-1)' : 'none';
+    try { await v.play(); } catch (e) {}
+    try {
+      var devs = await navigator.mediaDevices.enumerateDevices();
+      canFlip = devs.filter(function (d) { return d.kind === 'videoinput'; }).length > 1;
+    } catch (e) { canFlip = false; }
+    $('flip').textContent = facing === 'user' ? "🔄 Caméra arrière" : "🔄 Caméra avant";
+    setSt("Prêt. Appuie sur « Démarrer » (90 s maximum).");
+    show(['start', 'flip']);
+    return true;
+  }
+
   function reset() {
     stopStream();
     blob = null; chunks = [];
@@ -80,7 +105,13 @@
     v.removeAttribute('src'); v.srcObject = null; v.controls = false; v.muted = true; v.style.transform = 'none';
     setSt("Appuie sur « Démarrer » (90 s maximum).");
     show(['start']);
+    openCamera();
   }
+
+  $('flip').onclick = async function () {
+    facing = facing === 'user' ? 'environment' : 'user';
+    await openCamera();
+  };
 
   if (!CFG.url || !CFG.key || !CFG.token || !CFG.conv || !CFG.sender) {
     setSt("❌ Lien invalide (paramètres manquants).", true); show([]);
@@ -90,11 +121,7 @@
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
       setSt("L'enregistrement vidéo n'est pas disponible sur ce navigateur.", true); return;
     }
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true });
-    } catch (e) { setSt(errText(e), true); return; }
-    v.srcObject = stream; v.muted = true; v.controls = false; v.style.transform = 'scaleX(-1)';
-    try { await v.play(); } catch (e) {}
+    if (!stream) { var ok = await openCamera(); if (!ok) { return; } }
     var mt = pickMime();
     chunks = [];
     try { rec = new MediaRecorder(stream, mt ? { mimeType: mt } : undefined); }
