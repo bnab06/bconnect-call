@@ -14,6 +14,13 @@
   @supports (-webkit-touch-callout: none) {
     #bnb-status, #bnb-local-wrapper { top:max(66px, calc(env(safe-area-inset-top, 0px) + 24px)); }
   }
+  /* Vues inversées (un toucher sur la petite vignette) : ma caméra en grand,
+     celle du correspondant en petit en haut à droite. */
+  #bnb-call-root.swapped #bnb-local-wrapper { left:0 !important; top:0 !important; right:0 !important; bottom:0 !important; width:100% !important; height:100% !important; border-radius:0 !important; border:none !important; cursor:default !important; }
+  #bnb-call-root.swapped #bnb-remote-video { position:absolute; top:24px; right:24px; width:100px; height:130px; border-radius:14px; border:2px solid white; box-sizing:border-box; z-index:3; cursor:pointer; }
+  @supports (-webkit-touch-callout: none) {
+    #bnb-call-root.swapped #bnb-remote-video { top:max(66px, calc(env(safe-area-inset-top, 0px) + 24px)); }
+  }
   #bnb-cam-help { position:absolute; left:16px; right:16px; bottom:84px; display:none; background:rgba(231,76,60,0.92); color:white; padding:12px 14px; border-radius:14px; font-size:13px; line-height:1.4; text-align:center; z-index:5; }
   #bnb-cam-help button { margin-top:8px; background:white; color:#E74C3C; border:none; border-radius:10px; padding:8px 16px; font-weight:700; font-size:13px; }
   #bnb-status.big { left:24px; right:24px; top:38%; max-width:none; text-align:center; font-size:20px; line-height:1.4; padding:18px 20px; border-radius:18px; box-sizing:border-box; }
@@ -421,11 +428,21 @@
     };
 
     // Caméra locale déplaçable (souris + tactile)
-    let dragging = false;
+    const rootEl = document.getElementById('bnb-call-root');
+    let dragging = false, moved = false, startX = 0, startY = 0, lastTouch = 0;
     let offsetX = 0, offsetY = 0;
 
+    // Un toucher (sans glisser) sur la petite vignette inverse les deux vues ;
+    // un toucher sur la petite vignette du correspondant les remet à l'endroit.
+    function toggleSwap() { rootEl.classList.toggle('swapped'); }
+    remoteVideoEl.addEventListener('click', function () {
+        if (rootEl.classList.contains('swapped')) { toggleSwap(); }
+    });
+
     function startDrag(x, y) {
+        if (rootEl.classList.contains('swapped')) { return; }  // plein écran : rien à déplacer
         dragging = true;
+        moved = false; startX = x; startY = y;
         const rect = localWrapper.getBoundingClientRect();
         offsetX = x - rect.left;
         offsetY = y - rect.top;
@@ -433,6 +450,8 @@
     }
     function doDrag(x, y) {
         if (!dragging) return;
+        if (Math.abs(x - startX) > 6 || Math.abs(y - startY) > 6) { moved = true; }
+        if (!moved) return;
         const rootRect = document.getElementById('bnb-call-root').getBoundingClientRect();
         let newLeft = x - rootRect.left - offsetX;
         let newTop = y - rootRect.top - offsetY;
@@ -442,14 +461,20 @@
         localWrapper.style.top = newTop + 'px';
         localWrapper.style.right = 'auto';
     }
-    function endDrag() { dragging = false; localWrapper.style.cursor = 'grab'; }
+    function endDrag() {
+        const wasDragging = dragging;
+        dragging = false;
+        localWrapper.style.cursor = 'grab';
+        if (wasDragging && !moved) { toggleSwap(); }
+    }
 
-    localWrapper.addEventListener('mousedown', (e) => startDrag(e.clientX, e.clientY));
+    // Sur écran tactile, le navigateur rejoue un faux "mousedown" juste après le toucher : on l'ignore.
+    localWrapper.addEventListener('mousedown', (e) => { if (Date.now() - lastTouch < 800) { return; } startDrag(e.clientX, e.clientY); });
     document.addEventListener('mousemove', (e) => doDrag(e.clientX, e.clientY));
     document.addEventListener('mouseup', endDrag);
-    localWrapper.addEventListener('touchstart', (e) => { const t = e.touches[0]; startDrag(t.clientX, t.clientY); }, {passive: true});
+    localWrapper.addEventListener('touchstart', (e) => { lastTouch = Date.now(); const t = e.touches[0]; startDrag(t.clientX, t.clientY); }, {passive: true});
     document.addEventListener('touchmove', (e) => { const t = e.touches[0]; doDrag(t.clientX, t.clientY); }, {passive: true});
-    document.addEventListener('touchend', endDrag);
+    document.addEventListener('touchend', function () { lastTouch = Date.now(); endDrag(); });
 })();
 </script>
 
