@@ -93,7 +93,18 @@
         document.getElementById('bnb-decline-msg').textContent = reason ? "« " + reason + " »" : "";
         document.getElementById('bnb-decline').style.display = 'flex';
         var done = false;
-        function closeCard() { if (done) { return; } done = true; notifyParentCallEnded(); }
+        function closeCard() {
+            if (done) { return; }
+            done = true;
+            notifyParentCallEnded();
+            if (window.parent === window) {
+                // Page ouverte dans un onglet seul (ordinateur) : on tente de le fermer.
+                try { window.close(); } catch (e) {}
+                document.getElementById('bnb-decline-msg').textContent = "";
+                document.getElementById('bnb-decline-name').textContent = "Tu peux fermer cet onglet.";
+                document.getElementById('bnb-decline-ok').style.display = 'none';
+            }
+        }
         document.getElementById('bnb-decline-ok').onclick = closeCard;
         setTimeout(closeCard, 30000);
         try { if (navigator.vibrate) { navigator.vibrate(200); } } catch (e) {}
