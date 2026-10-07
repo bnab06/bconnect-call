@@ -434,8 +434,13 @@
 
     // Un toucher (sans glisser) sur la petite vignette inverse les deux vues ;
     // un toucher sur la petite vignette du correspondant les remet à l'endroit.
-    function toggleSwap() { rootEl.classList.toggle('swapped'); }
+    let lastSwap = 0;
+    function toggleSwap() { lastSwap = Date.now(); rootEl.classList.toggle('swapped'); }
     remoteVideoEl.addEventListener('click', function () {
+        // Android : juste après le toucher qui inverse les vues, le navigateur envoie un
+        // "clic" à l'endroit du doigt, où se trouve maintenant la vignette du correspondant :
+        // sans cette garde, les vues se remettaient aussitôt à l'endroit.
+        if (Date.now() - lastSwap < 700) { return; }
         if (rootEl.classList.contains('swapped')) { toggleSwap(); }
     });
 
